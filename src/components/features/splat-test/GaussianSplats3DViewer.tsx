@@ -7,6 +7,16 @@ interface GaussianSplats3DViewerProps {
   format: SplatFormat;
 }
 
+// Helper to convert Dropbox URLs to direct download format
+const getDirectDownloadUrl = (url: string): string => {
+  if (url.includes('dropbox.com')) {
+    // Change dl=0 to dl=1 for direct download
+    // Also use dl.dropboxusercontent.com for better compatibility
+    return url.replace('dl=0', 'dl=1').replace('www.dropbox.com', 'dl.dropboxusercontent.com');
+  }
+  return url;
+};
+
 export function GaussianSplats3DViewer({ url, format }: GaussianSplats3DViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
@@ -29,8 +39,12 @@ export function GaussianSplats3DViewer({ url, format }: GaussianSplats3DViewerPr
 
     viewerRef.current = viewer;
 
+    // Convert URL to direct download format (fixes Dropbox links)
+    const directUrl = getDirectDownloadUrl(url);
+    console.log('Loading splat scene from:', directUrl);
+
     // Add scene directly - returns a promise
-    viewer.addSplatScene(url, {
+    viewer.addSplatScene(directUrl, {
       splatAlphaRemovalThreshold: 5,
       showLoadingUI: false,
       progressiveLoad: true,
