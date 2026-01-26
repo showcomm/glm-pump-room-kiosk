@@ -39,5 +39,14 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src')
     }
-  }
+  },
+  optimizeDeps: {
+    exclude: ['@mkkellogg/gaussian-splats-3d'], // Don't pre-bundle gaussian splats library (WASM)
+  },
+  server: {
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    },
+  },
 })
