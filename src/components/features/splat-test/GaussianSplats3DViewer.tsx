@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 import type { SplatFormat } from '../SplatComparisonTest';
+import { getDirectDownloadUrl } from './urlUtils';
 
 interface GaussianSplats3DViewerProps {
   url: string;
@@ -29,11 +30,23 @@ export function GaussianSplats3DViewer({ url, format }: GaussianSplats3DViewerPr
 
     viewerRef.current = viewer;
 
+    // Transform URL for direct download access
+    const directUrl = getDirectDownloadUrl(url);
+    console.log('GaussianSplats3D: Loading from', directUrl);
+
+    // Map format to what the library expects (SceneFormat enum values)
+    const formatMap: Record<SplatFormat, number> = {
+      'ply': 0,    // SceneFormat.Ply
+      'splat': 1,  // SceneFormat.Splat  
+      'sog': 2,    // SceneFormat.Sog (may not be supported)
+    };
+
     // Add scene directly - returns a promise
-    viewer.addSplatScene(url, {
+    viewer.addSplatScene(directUrl, {
       splatAlphaRemovalThreshold: 5,
       showLoadingUI: false,
       progressiveLoad: true,
+      format: formatMap[format], // Explicitly specify format!
     })
     .then(() => {
       // Set camera constraints
@@ -68,7 +81,7 @@ export function GaussianSplats3DViewer({ url, format }: GaussianSplats3DViewerPr
         viewer.dispose();
       }
     };
-  }, [url]);
+  }, [url, format]);
 
   // Show format warning
   useEffect(() => {

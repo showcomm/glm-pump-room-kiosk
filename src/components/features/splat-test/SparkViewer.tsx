@@ -4,6 +4,7 @@ import { OrbitControls } from '@react-three/drei';
 import { SplatMesh } from '@sparkjsdev/spark';
 import * as THREE from 'three';
 import type { SplatFormat } from '../SplatComparisonTest';
+import { getDirectDownloadUrl } from './urlUtils';
 
 interface SparkViewerProps {
   url: string;
@@ -23,8 +24,12 @@ function SparkSplatMesh({ url }: { url: string }) {
         setLoading(true);
         setError(null);
         
+        // Transform URL for direct download access
+        const directUrl = getDirectDownloadUrl(url);
+        console.log('Spark: Loading from', directUrl);
+        
         // Create Spark splat mesh
-        splat = new SplatMesh({ url });
+        splat = new SplatMesh({ url: directUrl });
         
         // Position it at origin
         splat.position.set(0, 0, 0);
