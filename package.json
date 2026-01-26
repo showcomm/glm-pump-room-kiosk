@@ -19,7 +19,7 @@
     "@react-three/fiber": "^8.15.0",
     "@react-three/drei": "^9.92.0",
     "@sparkjsdev/spark": "^0.1.10",
-    "@mkkellogg/gaussian-splats-3d": "^0.6.0"
+    "@mkkellogg/gaussian-splats-3d": "^0.4.7"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",
