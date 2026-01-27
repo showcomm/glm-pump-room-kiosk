@@ -14,12 +14,18 @@ import { useSplat, useApp } from '@playcanvas/react/hooks'
 import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs'
 
 // ============================================
-// CONFIGURATION - Update this path to your .ply file
+// CONFIGURATION
 // ============================================
 const SPLAT_URL = '/pump-room.ply'
 
 // Frame width in pixels (black border around viewport)
 const FRAME_WIDTH = 24
+
+// Initial camera position and rotation
+const INITIAL_CAMERA = {
+  position: [-0.005, -6.86, 0.296] as [number, number, number],
+  rotation: [87.53, -0.96, 0] as [number, number, number]
+}
 
 // ============================================
 // Splat Component
@@ -183,7 +189,8 @@ export default function SplatTest() {
         {/* Camera with CameraControls script */}
         <Entity 
           name="camera" 
-          position={[0, 2, 5]}
+          position={INITIAL_CAMERA.position}
+          rotation={INITIAL_CAMERA.rotation}
         >
           <Camera 
             clearColor="#1a1a2e"
