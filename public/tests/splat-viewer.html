@@ -8,7 +8,7 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; overflow: hidden; }
     body { background: #1a1816; }
-    #viewer-canvas { width: 100%; height: 100%; display: block; }
+    #viewer-container { width: 100%; height: 100%; }
     .status {
       position: absolute;
       top: 16px;
@@ -20,36 +20,65 @@
       font-family: system-ui, sans-serif;
       font-size: 13px;
       z-index: 100;
-      max-width: 600px;
-      word-break: break-all;
+      max-width: 400px;
     }
     .status.loading { border-left: 3px solid #8b6f47; }
     .status.success { border-left: 3px solid #4ade80; }
     .status.error { border-left: 3px solid #f87171; }
+    .camera-info {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      background: rgba(0,0,0,0.85);
+      color: #d4c5b0;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 12px;
+      z-index: 100;
+    }
+    .camera-info button {
+      margin-top: 8px;
+      padding: 4px 12px;
+      background: #8b6f47;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .camera-info button:hover { background: #a08759; }
   </style>
 </head>
 <body>
-  <canvas id="viewer-canvas"></canvas>
+  <div id="viewer-container"></div>
   <div class="status loading" id="status">Initializing...</div>
+  <div class="camera-info" id="camera-info">
+    <div id="camera-pos">Position: --</div>
+    <div id="camera-target">Target: --</div>
+    <button id="copy-camera">Copy Camera</button>
+  </div>
 
   <script type="importmap">
   {
     "imports": {
       "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+      "@mkkellogg/gaussian-splats-3d": "https://unpkg.com/@mkkellogg/gaussian-splats-3d@0.4.6/build/gaussian-splats-3d.module.js"
     }
   }
   </script>
 
   <script type="module">
-    import * as THREE from 'three';
-    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
     
-    const canvas = document.getElementById('viewer-canvas');
+    const container = document.getElementById('viewer-container');
     const statusEl = document.getElementById('status');
+    const cameraPosEl = document.getElementById('camera-pos');
+    const cameraTargetEl = document.getElementById('camera-target');
+    const copyBtn = document.getElementById('copy-camera');
     
-    let scene, camera, renderer, controls;
-    let pointCloud = null;
+    let viewer = null;
     
     function setStatus(msg, type = 'loading') {
       statusEl.textContent = msg;
@@ -57,194 +86,89 @@
       console.log('[STATUS]', type, msg);
     }
     
-    function initThree() {
-      scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x1a1816);
-      
-      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 1000);
-      camera.position.set(2, 1.5, 3);
-      
-      renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      
-      controls = new OrbitControls(camera, canvas);
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.08;
-      
-      scene.add(new THREE.GridHelper(10, 20, 0x3d3530, 0x2a2622));
-      scene.add(new THREE.AxesHelper(1));
-      
-      animate();
+    function formatVec(v) {
+      return `[${v.x.toFixed(3)}, ${v.y.toFixed(3)}, ${v.z.toFixed(3)}]`;
     }
     
-    function animate() {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
+    function updateCameraDisplay() {
+      if (viewer && viewer.camera) {
+        const pos = viewer.camera.position;
+        const target = viewer.controls?.target || { x: 0, y: 0, z: 0 };
+        cameraPosEl.textContent = `Position: ${formatVec(pos)}`;
+        cameraTargetEl.textContent = `Target: ${formatVec(target)}`;
+      }
+      requestAnimationFrame(updateCameraDisplay);
     }
     
-    async function parsePLY(arrayBuffer) {
-      console.log('Buffer size:', arrayBuffer.byteLength);
-      
-      const headerView = new Uint8Array(arrayBuffer, 0, Math.min(10000, arrayBuffer.byteLength));
-      const headerText = new TextDecoder().decode(headerView);
-      
-      // Debug: show first 500 chars of header
-      console.log('Header preview:', headerText.substring(0, 500));
-      
-      const headerEndIndex = headerText.indexOf('end_header');
-      if (headerEndIndex === -1) {
-        console.error('No end_header found. First 200 chars:', headerText.substring(0, 200));
-        throw new Error('Invalid PLY: no end_header. First chars: ' + headerText.substring(0, 100));
+    copyBtn.addEventListener('click', () => {
+      if (viewer && viewer.camera) {
+        const pos = viewer.camera.position;
+        const target = viewer.controls?.target || { x: 0, y: 0, z: 0 };
+        const data = {
+          position: [pos.x, pos.y, pos.z],
+          target: [target.x, target.y, target.z]
+        };
+        navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => copyBtn.textContent = 'Copy Camera', 1500);
       }
-      
-      const header = headerText.substring(0, headerEndIndex);
-      console.log('Full header:', header);
-      
-      const formatMatch = header.match(/format (\w+)/);
-      const format = formatMatch ? formatMatch[1] : 'ascii';
-      console.log('Format:', format);
-      
-      const vertexMatch = header.match(/element vertex (\d+)/);
-      console.log('Vertex match:', vertexMatch);
-      
-      if (!vertexMatch) {
-        throw new Error('No vertex count found in header');
-      }
-      const vertexCount = parseInt(vertexMatch[1]);
-      console.log('Vertex count:', vertexCount);
-      
-      const properties = [];
-      const propRegex = /property (\w+) (\w+)/g;
-      let match;
-      while ((match = propRegex.exec(header)) !== null) {
-        properties.push({ type: match[1], name: match[2] });
-      }
-      console.log('Properties:', properties);
-      
-      const newlineAfterHeader = headerText.indexOf('\n', headerEndIndex);
-      const dataStartByte = newlineAfterHeader + 1;
-      console.log('Data starts at byte:', dataStartByte);
-      
-      const propSizes = { 'float': 4, 'float32': 4, 'uchar': 1, 'uint8': 1 };
-      let vertexSize = 0;
-      const propOffsets = {};
-      for (const prop of properties) {
-        propOffsets[prop.name] = vertexSize;
-        vertexSize += propSizes[prop.type] || 4;
-      }
-      console.log('Vertex size:', vertexSize, 'Offsets:', propOffsets);
-      
-      const positions = new Float32Array(vertexCount * 3);
-      const colors = new Float32Array(vertexCount * 3);
-      
-      if (format.includes('binary')) {
-        const littleEndian = format === 'binary_little_endian';
-        const dataView = new DataView(arrayBuffer, dataStartByte);
-        
-        for (let i = 0; i < vertexCount; i++) {
-          const offset = i * vertexSize;
-          
-          positions[i * 3] = dataView.getFloat32(offset + propOffsets['x'], littleEndian);
-          positions[i * 3 + 1] = dataView.getFloat32(offset + propOffsets['y'], littleEndian);
-          positions[i * 3 + 2] = dataView.getFloat32(offset + propOffsets['z'], littleEndian);
-          
-          if (propOffsets['f_dc_0'] !== undefined) {
-            const SH_C0 = 0.28209479177387814;
-            const sh0 = dataView.getFloat32(offset + propOffsets['f_dc_0'], littleEndian);
-            const sh1 = dataView.getFloat32(offset + propOffsets['f_dc_1'], littleEndian);
-            const sh2 = dataView.getFloat32(offset + propOffsets['f_dc_2'], littleEndian);
-            colors[i * 3] = Math.max(0, Math.min(1, 0.5 + SH_C0 * sh0));
-            colors[i * 3 + 1] = Math.max(0, Math.min(1, 0.5 + SH_C0 * sh1));
-            colors[i * 3 + 2] = Math.max(0, Math.min(1, 0.5 + SH_C0 * sh2));
-          } else {
-            colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = 0.5;
-          }
-        }
-      }
-      
-      return { positions, colors, count: vertexCount };
-    }
-    
-    function createPointCloud(data) {
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
-      geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
-      geometry.computeBoundingBox();
-      geometry.computeBoundingSphere();
-      geometry.center();
-      
-      const material = new THREE.PointsMaterial({
-        size: 0.008,
-        vertexColors: true,
-        sizeAttenuation: true
-      });
-      
-      const points = new THREE.Points(geometry, material);
-      
-      const sphere = geometry.boundingSphere;
-      if (sphere) {
-        const dist = sphere.radius * 2.5;
-        camera.position.set(dist * 0.6, dist * 0.4, dist * 0.8);
-        controls.target.set(0, 0, 0);
-        controls.update();
-      }
-      
-      return points;
-    }
+    });
     
     async function loadSplat(url) {
-      setStatus('Fetching ' + url + '...', 'loading');
+      setStatus('Loading splat: ' + url, 'loading');
       
       try {
-        const response = await fetch(url);
-        console.log('Response status:', response.status);
-        console.log('Content-Type:', response.headers.get('content-type'));
-        
-        if (!response.ok) throw new Error('HTTP ' + response.status);
-        
-        setStatus('Parsing PLY...', 'loading');
-        const arrayBuffer = await response.arrayBuffer();
-        const data = await parsePLY(arrayBuffer);
-        
-        if (pointCloud) {
-          scene.remove(pointCloud);
-          pointCloud.geometry.dispose();
-          pointCloud.material.dispose();
+        // Dispose previous viewer
+        if (viewer) {
+          viewer.dispose();
+          viewer = null;
+          container.innerHTML = '';
         }
         
-        pointCloud = createPointCloud(data);
-        scene.add(pointCloud);
+        // Create new viewer
+        viewer = new GaussianSplats3D.Viewer({
+          cameraUp: [0, 1, 0],
+          initialCameraPosition: [0, 2, 5],
+          initialCameraLookAt: [0, 0, 0],
+          rootElement: container,
+          sceneRevealMode: GaussianSplats3D.SceneRevealMode.Instant,
+          crossOriginIsolated: false
+        });
         
-        setStatus(data.count.toLocaleString() + ' points loaded', 'success');
+        // Load the splat file
+        await viewer.addSplatScene(url, {
+          splatAlphaRemovalThreshold: 5,
+          showLoadingUI: true,
+          progressiveLoad: true
+        });
+        
+        viewer.start();
+        
+        // Start camera display updates
+        updateCameraDisplay();
+        
+        setStatus('Loaded successfully', 'success');
+        
       } catch (err) {
         console.error('Load error:', err);
         setStatus('Error: ' + err.message, 'error');
       }
     }
     
-    window.addEventListener('resize', () => {
-      if (renderer && camera) {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-      }
-    });
-    
+    // Listen for messages from parent
     window.addEventListener('message', (e) => {
       if (e.data && e.data.type === 'load' && e.data.src) {
         loadSplat(e.data.src);
       }
     });
     
-    initThree();
+    // Load from query param
     const params = new URLSearchParams(window.location.search);
     const src = params.get('src');
     if (src) {
       loadSplat(src);
     } else {
-      setStatus('No file specified', 'error');
+      setStatus('No file specified. Add ?src=/path/to/file.ply', 'error');
     }
   </script>
 </body>
