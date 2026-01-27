@@ -2,6 +2,9 @@ import { useState, Suspense } from 'react'
 import { BackButton } from '../shared/BackButton'
 import { Viewer } from '@playcanvas/blocks'
 
+// Import PlayCanvas blocks CSS
+import '@playcanvas/blocks/style.css'
+
 interface EquipmentExplorerProps {
   onBack: () => void
 }
@@ -24,24 +27,29 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Viewer */}
-        <div className="flex-1 relative bg-black" style={{ minHeight: '400px' }}>
-          <Suspense fallback={<div className="text-white p-4">Loading viewer...</div>}>
-            <Viewer.Splat 
-              key={currentSrc}
-              src={currentSrc}
-              style={{ width: '100%', height: '100%' }}
-            >
-              <Viewer.Progress />
-              <Viewer.Controls>
-                <Viewer.CameraModeToggle />
-              </Viewer.Controls>
-            </Viewer.Splat>
-          </Suspense>
+        {/* Viewer - needs explicit dimensions */}
+        <div 
+          className="flex-1 relative"
+          style={{ 
+            minHeight: '400px',
+            background: '#000'
+          }}
+        >
+          <div style={{ position: 'absolute', inset: 0 }}>
+            <Suspense fallback={<div className="text-white p-4">Loading viewer...</div>}>
+              <Viewer.Splat 
+                key={currentSrc}
+                src={currentSrc}
+                className="w-full h-full"
+              >
+                <Viewer.Progress />
+              </Viewer.Splat>
+            </Suspense>
+          </div>
         </div>
 
         {/* Control Panel */}
-        <div className="w-72 bg-[#2a2622] border-l border-[#3d3530] p-4 overflow-y-auto">
+        <div className="w-72 bg-[#2a2622] border-l border-[#3d3530] p-4 overflow-y-auto flex-shrink-0">
           {/* File Path */}
           <section className="mb-6">
             <h3 className="text-[#8b6f47] font-semibold mb-2">PLY File</h3>
