@@ -15,7 +15,6 @@ export function HomeScreen({ onSelectFeature }: HomeScreenProps) {
     { id: 'cutaway', label: ui.featureCutaway, icon: '🏛️' },
     { id: 'quiz', label: ui.featureQuiz, icon: '❓' },
     { id: 'gallery', label: ui.featureGallery, icon: '📷' },
-    { id: 'splat-test', label: ui.featureExplore, icon: '🧪' },
   ]
 
   return (
