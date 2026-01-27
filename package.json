@@ -12,7 +12,7 @@
   "dependencies": {
     "@playcanvas/react": "^0.11.0",
     "@supabase/supabase-js": "^2.39.0",
-    "playcanvas": "~2.8.2",
+    "playcanvas": "^2.11.8",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^6.21.0",
