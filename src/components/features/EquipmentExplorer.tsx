@@ -1,8 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, Suspense } from 'react'
 import { BackButton } from '../shared/BackButton'
-
-// Import PlayCanvas blocks - registers web components
-import '@playcanvas/blocks'
+import { Viewer } from '@playcanvas/blocks'
 
 interface EquipmentExplorerProps {
   onBack: () => void
@@ -11,20 +9,11 @@ interface EquipmentExplorerProps {
 export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
   const [plyPath, setPlyPath] = useState('/splats/export_10000.ply')
   const [currentSrc, setCurrentSrc] = useState('/splats/export_10000.ply')
-  const containerRef = useRef<HTMLDivElement>(null)
 
   const loadSplat = () => {
     console.log('Loading splat:', plyPath)
     setCurrentSrc(plyPath)
   }
-
-  // Log container dimensions to debug sizing issues
-  useEffect(() => {
-    if (containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect()
-      console.log('Container dimensions:', rect.width, 'x', rect.height)
-    }
-  }, [])
 
   return (
     <div className="w-full h-full flex flex-col bg-[#1f1c1a]">
@@ -35,25 +24,20 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Viewer - PlayCanvas web component */}
-        <div 
-          ref={containerRef}
-          className="flex-1 relative"
-          style={{ minHeight: '400px', background: '#000' }}
-        >
-          <pc-splat-viewer
-            src={currentSrc}
-            style={{ 
-              width: '100%', 
-              height: '100%', 
-              display: 'block',
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0
-            }}
-          />
+        {/* Viewer */}
+        <div className="flex-1 relative bg-black" style={{ minHeight: '400px' }}>
+          <Suspense fallback={<div className="text-white p-4">Loading viewer...</div>}>
+            <Viewer.Splat 
+              key={currentSrc}
+              src={currentSrc}
+              style={{ width: '100%', height: '100%' }}
+            >
+              <Viewer.Progress />
+              <Viewer.Controls>
+                <Viewer.CameraModeToggle />
+              </Viewer.Controls>
+            </Viewer.Splat>
+          </Suspense>
         </div>
 
         {/* Control Panel */}
@@ -101,18 +85,4 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
       </div>
     </div>
   )
-}
-
-// Declare the web component for TypeScript
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      'pc-splat-viewer': React.DetailedHTMLProps<
-        React.HTMLAttributes<HTMLElement> & { 
-          src?: string
-        },
-        HTMLElement
-      >
-    }
-  }
 }
