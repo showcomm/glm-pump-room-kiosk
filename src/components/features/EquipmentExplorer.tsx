@@ -2,9 +2,6 @@ import { useState, Suspense } from 'react'
 import { BackButton } from '../shared/BackButton'
 import { Viewer } from '@playcanvas/blocks'
 
-// Import PlayCanvas blocks CSS
-import '@playcanvas/blocks/style.css'
-
 interface EquipmentExplorerProps {
   onBack: () => void
 }
@@ -40,7 +37,7 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
               <Viewer.Splat 
                 key={currentSrc}
                 src={currentSrc}
-                className="w-full h-full"
+                style={{ width: '100%', height: '100%' }}
               >
                 <Viewer.Progress />
               </Viewer.Splat>
