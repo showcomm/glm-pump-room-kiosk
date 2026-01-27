@@ -1,5 +1,17 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
+import '@playcanvas/blocks'
 import { BackButton } from '../shared/BackButton'
+
+// Declare the web component for TypeScript
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      'pc-splat-viewer': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & {
+        src?: string
+      }, HTMLElement>
+    }
+  }
+}
 
 interface EquipmentExplorerProps {
   onBack: () => void
@@ -24,7 +36,6 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
       <div className="flex-1 flex overflow-hidden">
         {/* Viewer - using PlayCanvas web component */}
         <div className="flex-1 relative">
-          {/* @ts-ignore - web component */}
           <pc-splat-viewer
             src={loadedPath}
             style={{ width: '100%', height: '100%', display: 'block' }}
