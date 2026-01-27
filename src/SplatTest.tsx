@@ -9,9 +9,9 @@
 
 import { useState, useEffect } from 'react'
 import { Application, Entity } from '@playcanvas/react'
-import { Camera, GSplat } from '@playcanvas/react/components'
-import { OrbitControls } from '@playcanvas/react/scripts'
+import { Camera, GSplat, Script } from '@playcanvas/react/components'
 import { useSplat, useApp } from '@playcanvas/react/hooks'
+import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs'
 
 // ============================================
 // CONFIGURATION - Update this path to your .ply file
@@ -40,8 +40,10 @@ function PumpRoomSplat({ src }: { src: string }) {
 
   console.log('Splat rendering with asset:', asset)
   
+  // Rotation to fix upside-down model if needed
+  // Try [180, 0, 0] if model is upside down
   return (
-    <Entity position={[0, 0, 0]}>
+    <Entity position={[0, 0, 0]} rotation={[0, 0, 0]}>
       <GSplat asset={asset} />
     </Entity>
   )
@@ -72,14 +74,11 @@ function CameraCaptureHelper() {
       }
       
       console.log('Camera captured:', data)
-      
-      // Dispatch custom event with camera data
       window.dispatchEvent(new CustomEvent('camera-captured', { detail: data }))
       
       return data
     }
     
-    // Expose to window for console debugging
     ;(window as any).captureCamera = captureCamera
     
     return () => {
@@ -105,7 +104,6 @@ function CameraInfoPanel() {
   }, [])
   
   const handleCapture = () => {
-    // Call the exposed window function
     if ((window as any).captureCamera) {
       (window as any).captureCamera()
     }
@@ -122,7 +120,7 @@ function CameraInfoPanel() {
       </button>
       <div>Pos: [{cameraData.pos.map(v => v.toFixed(2)).join(', ')}]</div>
       <div>Rot: [{cameraData.rot.map(v => v.toFixed(1)).join(', ')}]</div>
-      <div className="text-gray-500 text-xs mt-2">Also: window.captureCamera()</div>
+      <div className="text-gray-500 text-xs mt-2">Console: captureCamera()</div>
     </div>
   )
 }
@@ -133,14 +131,14 @@ function CameraInfoPanel() {
 export default function SplatTest() {
   return (
     <div className="w-screen h-screen bg-black relative">
-      {/* Camera debug panel - outside Application */}
+      {/* Camera debug panel */}
       <CameraInfoPanel />
 
       {/* Instructions */}
       <div className="absolute bottom-4 right-4 bg-black/70 text-white p-4 rounded-lg text-sm z-20">
         <div className="text-gray-400 mb-1">Controls:</div>
         <div>Left drag: Orbit</div>
-        <div>Right drag: Pan</div>
+        <div>Middle drag: Pan</div>
         <div>Scroll: Zoom</div>
       </div>
 
@@ -148,7 +146,7 @@ export default function SplatTest() {
       <Application
         graphicsDeviceOptions={{ antialias: false }}
       >
-        {/* Camera with orbit controls */}
+        {/* Camera with CameraControls script */}
         <Entity 
           name="camera" 
           position={[0, 2, 5]}
@@ -156,8 +154,10 @@ export default function SplatTest() {
           <Camera 
             clearColor="#1a1a2e"
             fov={60}
+            farClip={1000}
+            nearClip={0.01}
           />
-          <OrbitControls />
+          <Script script={CameraControls} />
         </Entity>
 
         {/* The splat model */}
