@@ -8,7 +8,13 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; overflow: hidden; }
     body { background: #1a1816; }
-    #viewer-container { width: 100%; height: 100%; }
+    #viewer-container { 
+      width: 100%; 
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
     .status {
       position: absolute;
       top: 16px;
@@ -52,25 +58,15 @@
 </head>
 <body>
   <div id="viewer-container"></div>
-  <div class="status loading" id="status">Initializing...</div>
+  <div class="status loading" id="status">Initializing PlayCanvas...</div>
   <div class="camera-info" id="camera-info">
     <div id="camera-pos">Position: --</div>
     <div id="camera-target">Target: --</div>
     <button id="copy-camera">Copy Camera</button>
   </div>
 
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-      "@mkkellogg/gaussian-splats-3d": "https://unpkg.com/@mkkellogg/gaussian-splats-3d@0.4.6/build/gaussian-splats-3d.module.js"
-    }
-  }
-  </script>
-
   <script type="module">
-    import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
+    import { Viewer } from 'https://esm.sh/@playcanvas/blocks@0.3.7';
     
     const container = document.getElementById('viewer-container');
     const statusEl = document.getElementById('status');
@@ -87,23 +83,14 @@
     }
     
     function formatVec(v) {
+      if (!v) return '--';
       return `[${v.x.toFixed(3)}, ${v.y.toFixed(3)}, ${v.z.toFixed(3)}]`;
-    }
-    
-    function updateCameraDisplay() {
-      if (viewer && viewer.camera) {
-        const pos = viewer.camera.position;
-        const target = viewer.controls?.target || { x: 0, y: 0, z: 0 };
-        cameraPosEl.textContent = `Position: ${formatVec(pos)}`;
-        cameraTargetEl.textContent = `Target: ${formatVec(target)}`;
-      }
-      requestAnimationFrame(updateCameraDisplay);
     }
     
     copyBtn.addEventListener('click', () => {
       if (viewer && viewer.camera) {
-        const pos = viewer.camera.position;
-        const target = viewer.controls?.target || { x: 0, y: 0, z: 0 };
+        const pos = viewer.camera.getPosition();
+        const target = viewer.cameraControls?.focus || { x: 0, y: 0, z: 0 };
         const data = {
           position: [pos.x, pos.y, pos.z],
           target: [target.x, target.y, target.z]
@@ -115,39 +102,35 @@
     });
     
     async function loadSplat(url) {
-      setStatus('Loading splat: ' + url, 'loading');
+      setStatus('Loading: ' + url, 'loading');
       
       try {
-        // Dispose previous viewer
-        if (viewer) {
-          viewer.dispose();
-          viewer = null;
-          container.innerHTML = '';
-        }
-        
-        // Create new viewer
-        viewer = new GaussianSplats3D.Viewer({
-          cameraUp: [0, 1, 0],
-          initialCameraPosition: [0, 2, 5],
-          initialCameraLookAt: [0, 0, 0],
-          rootElement: container,
-          sceneRevealMode: GaussianSplats3D.SceneRevealMode.Instant,
-          crossOriginIsolated: false
+        // Create PlayCanvas viewer
+        viewer = new Viewer(container, {
+          graphicsDeviceOptions: {
+            antialias: true,
+            alpha: false,
+            preserveDrawingBuffer: false,
+            preferWebGl2: true
+          }
         });
         
-        // Load the splat file
-        await viewer.addSplatScene(url, {
-          splatAlphaRemovalThreshold: 5,
-          showLoadingUI: true,
-          progressiveLoad: true
-        });
+        console.log('Viewer created:', viewer);
         
-        viewer.start();
+        // Load the splat
+        await viewer.load(url);
         
-        // Start camera display updates
-        updateCameraDisplay();
+        console.log('Splat loaded');
         
-        setStatus('Loaded successfully', 'success');
+        // Update camera display periodically
+        setInterval(() => {
+          if (viewer && viewer.camera) {
+            const pos = viewer.camera.getPosition();
+            cameraPosEl.textContent = `Position: ${formatVec(pos)}`;
+          }
+        }, 100);
+        
+        setStatus('Loaded', 'success');
         
       } catch (err) {
         console.error('Load error:', err);
