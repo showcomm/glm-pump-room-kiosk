@@ -19,10 +19,12 @@ const CAMERA_PRESETS = [
 export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<any>(null)
+  const isLoadingRef = useRef(false)
+  const isMountedRef = useRef(false)
   
   const [selectedFile, setSelectedFile] = useState('/splats/export_30000.ply')
   const [customPath, setCustomPath] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [splatInfo, setSplatInfo] = useState<{ count: number; loadTime: number } | null>(null)
   const [cameraInfo, setCameraInfo] = useState({ position: [0, 0, 0], target: [0, 0, 0] })
@@ -35,117 +37,154 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
   ]
 
   // Update camera info periodically
-  const updateCameraInfo = useCallback(() => {
-    if (viewerRef.current?.camera) {
-      const cam = viewerRef.current.camera
-      const controls = viewerRef.current.controls
-      setCameraInfo({
-        position: [
-          parseFloat(cam.position.x.toFixed(2)),
-          parseFloat(cam.position.y.toFixed(2)),
-          parseFloat(cam.position.z.toFixed(2))
-        ],
-        target: controls ? [
-          parseFloat(controls.target.x.toFixed(2)),
-          parseFloat(controls.target.y.toFixed(2)),
-          parseFloat(controls.target.z.toFixed(2))
-        ] : [0, 0, 0]
-      })
-    }
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (viewerRef.current?.camera && viewerRef.current?.controls) {
+        const cam = viewerRef.current.camera
+        const controls = viewerRef.current.controls
+        setCameraInfo({
+          position: [
+            parseFloat(cam.position.x.toFixed(2)),
+            parseFloat(cam.position.y.toFixed(2)),
+            parseFloat(cam.position.z.toFixed(2))
+          ],
+          target: [
+            parseFloat(controls.target.x.toFixed(2)),
+            parseFloat(controls.target.y.toFixed(2)),
+            parseFloat(controls.target.z.toFixed(2))
+          ]
+        })
+      }
+    }, 200)
+    
+    return () => clearInterval(interval)
   }, [])
 
-  // Load splat function
-  const loadSplat = useCallback(async (path: string) => {
-    if (!containerRef.current) return
-
-    // Cleanup existing viewer
-    if (viewerRef.current) {
-      viewerRef.current.dispose()
-      viewerRef.current = null
-    }
-
-    setLoading(true)
-    setError(null)
-    setSplatInfo(null)
-
-    const startTime = performance.now()
-
-    try {
-      // Create new viewer
-      const viewer = new GaussianSplats3D.Viewer({
-        cameraUp: [0, 1, 0],
-        initialCameraPosition: [0, 2, 8],
-        initialCameraLookAt: [0, 0, 0],
-        rootElement: containerRef.current,
-        sharedMemoryForWorkers: false,
-        dynamicScene: false,
-        selfDrivenMode: true,
-        useBuiltInControls: true,
-      })
-
-      viewerRef.current = viewer
-
-      console.log('Loading splat from:', path)
-
-      // Load the splat scene
-      await viewer.addSplatScene(path, {
-        splatAlphaRemovalThreshold: 5,
-        showLoadingUI: true,
-        progressiveLoad: true,
-      })
-
-      // Configure controls
-      const controls = viewer.controls
-      if (controls) {
-        controls.enableDamping = true
-        controls.dampingFactor = 0.1
-        controls.rotateSpeed = 0.5
-        controls.zoomSpeed = 1.0
-        controls.minDistance = 0.5
-        controls.maxDistance = 50
-      }
-
-      // Start rendering
-      viewer.start()
-
-      const loadTime = (performance.now() - startTime) / 1000
-
-      // Get splat count if available
-      let count = 0
-      try {
-        count = viewer.getSplatCount?.() || 0
-      } catch (e) {
-        console.log('Could not get splat count')
-      }
-
-      setSplatInfo({ count, loadTime })
-      setLoading(false)
-
-      // Start camera info updates
-      const interval = setInterval(updateCameraInfo, 100)
-      return () => clearInterval(interval)
-
-    } catch (err: any) {
-      console.error('Splat load error:', err)
-      setError(err.message || 'Failed to load splat')
-      setLoading(false)
-    }
-  }, [updateCameraInfo])
-
-  // Load on mount and when file changes
+  // Load splat on mount
   useEffect(() => {
-    const path = selectedFile === 'custom' ? customPath : selectedFile
-    if (path && path !== 'custom') {
-      const cleanup = loadSplat(path)
-      return () => {
-        cleanup?.then(fn => fn?.())
-        if (viewerRef.current) {
+    isMountedRef.current = true
+    
+    const loadSplat = async () => {
+      if (!containerRef.current || isLoadingRef.current) return
+      
+      const path = selectedFile === 'custom' ? customPath : selectedFile
+      if (!path || path === 'custom') return
+
+      isLoadingRef.current = true
+      setLoading(true)
+      setError(null)
+      setSplatInfo(null)
+
+      // Clean up existing viewer
+      if (viewerRef.current) {
+        try {
           viewerRef.current.dispose()
-          viewerRef.current = null
+        } catch (e) {
+          console.log('Cleanup error (safe to ignore):', e)
         }
+        viewerRef.current = null
+      }
+      
+      // Clear container
+      while (containerRef.current.firstChild) {
+        containerRef.current.removeChild(containerRef.current.firstChild)
+      }
+
+      const startTime = performance.now()
+
+      try {
+        // Check if still mounted
+        if (!isMountedRef.current) {
+          isLoadingRef.current = false
+          return
+        }
+
+        console.log('Creating viewer for:', path)
+
+        // Create new viewer
+        const viewer = new GaussianSplats3D.Viewer({
+          cameraUp: [0, 1, 0],
+          initialCameraPosition: [0, 2, 8],
+          initialCameraLookAt: [0, 0, 0],
+          rootElement: containerRef.current,
+          sharedMemoryForWorkers: false,
+          dynamicScene: false,
+          selfDrivenMode: true,
+          useBuiltInControls: true,
+        })
+
+        viewerRef.current = viewer
+
+        // Load the splat scene
+        await viewer.addSplatScene(path, {
+          splatAlphaRemovalThreshold: 5,
+          showLoadingUI: false,
+          progressiveLoad: true,
+        })
+
+        // Check if still mounted after async load
+        if (!isMountedRef.current) {
+          viewer.dispose()
+          isLoadingRef.current = false
+          return
+        }
+
+        // Configure controls
+        const controls = viewer.controls
+        if (controls) {
+          controls.enableDamping = true
+          controls.dampingFactor = 0.1
+          controls.rotateSpeed = 0.5
+          controls.zoomSpeed = 1.0
+          controls.minDistance = 0.5
+          controls.maxDistance = 50
+        }
+
+        // Start rendering
+        viewer.start()
+
+        const loadTime = (performance.now() - startTime) / 1000
+
+        // Get splat count if available
+        let count = 0
+        try {
+          count = viewer.getSplatCount?.() || 0
+        } catch (e) {
+          console.log('Could not get splat count')
+        }
+
+        setSplatInfo({ count, loadTime })
+        setLoading(false)
+        isLoadingRef.current = false
+
+        console.log('Splat loaded successfully:', count, 'splats in', loadTime.toFixed(2), 's')
+
+      } catch (err: any) {
+        if (!isMountedRef.current) {
+          isLoadingRef.current = false
+          return
+        }
+        console.error('Splat load error:', err)
+        setError(err.message || 'Failed to load splat')
+        setLoading(false)
+        isLoadingRef.current = false
       }
     }
-  }, [selectedFile, loadSplat])
+
+    loadSplat()
+
+    return () => {
+      isMountedRef.current = false
+      if (viewerRef.current) {
+        try {
+          viewerRef.current.dispose()
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+        viewerRef.current = null
+      }
+    }
+  }, [selectedFile, customPath])
 
   // Move camera to preset
   const moveCameraTo = (preset: typeof CAMERA_PRESETS[0]) => {
@@ -153,8 +192,8 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
       const camera = viewerRef.current.camera
       const controls = viewerRef.current.controls
       
-      camera.position.set(...preset.position)
-      controls.target.set(...preset.target)
+      camera.position.set(preset.position[0], preset.position[1], preset.position[2])
+      controls.target.set(preset.target[0], preset.target[1], preset.target[2])
       controls.update()
     }
   }
@@ -163,6 +202,16 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
   const copyCameraPosition = () => {
     const code = `{ position: [${cameraInfo.position.join(', ')}], target: [${cameraInfo.target.join(', ')}] }`
     navigator.clipboard.writeText(code)
+  }
+
+  // Manual reload
+  const handleReload = () => {
+    const path = selectedFile === 'custom' ? customPath : selectedFile
+    if (path && path !== 'custom') {
+      // Force re-mount by toggling a dummy state
+      setSelectedFile('')
+      setTimeout(() => setSelectedFile(path), 50)
+    }
   }
 
   return (
@@ -184,13 +233,14 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Splat Viewer */}
-        <div className="flex-1 relative" ref={containerRef}>
+        <div className="flex-1 relative bg-[#1a1816]" ref={containerRef}>
           {/* Loading overlay */}
           {loading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-[#1f1c1a]/90 z-20">
+            <div className="absolute inset-0 flex items-center justify-center bg-[#1f1c1a] z-20">
               <div className="text-center">
                 <div className="w-12 h-12 border-4 border-[#8b6f47] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
                 <p className="text-[#d4c5b0]">Loading Gaussian Splat...</p>
+                <p className="text-[#d4c5b0]/60 text-sm mt-2">This may take a moment for large files</p>
               </div>
             </div>
           )}
@@ -219,11 +269,13 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
           )}
 
           {/* Controls hint */}
-          <div className="absolute bottom-4 right-4 bg-black/80 text-[#d4c5b0] p-3 rounded text-xs z-10">
-            <p>🖱️ Left-drag: Rotate</p>
-            <p>🖱️ Scroll: Zoom</p>
-            <p>🖱️ Right-drag: Pan</p>
-          </div>
+          {!loading && (
+            <div className="absolute bottom-4 right-4 bg-black/80 text-[#d4c5b0] p-3 rounded text-xs z-10">
+              <p>🖱️ Left-drag: Rotate</p>
+              <p>🖱️ Scroll: Zoom</p>
+              <p>🖱️ Right-drag: Pan</p>
+            </div>
+          )}
         </div>
 
         {/* Control Panel */}
@@ -253,12 +305,6 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
                     placeholder="/splats/your-file.ply"
                     className="flex-1 px-3 py-2 bg-[#1f1c1a] text-[#d4c5b0] border border-[#3d3530] rounded text-sm"
                   />
-                  <button
-                    onClick={() => loadSplat(customPath)}
-                    className="px-3 py-2 bg-[#8b6f47] hover:bg-[#a08759] text-white rounded"
-                  >
-                    Load
-                  </button>
                 </div>
               )}
             </section>
@@ -318,13 +364,11 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
 
             {/* Reload Button */}
             <button
-              onClick={() => {
-                const path = selectedFile === 'custom' ? customPath : selectedFile
-                if (path) loadSplat(path)
-              }}
-              className="w-full px-4 py-2 bg-[#8b6f47] hover:bg-[#a08759] text-white rounded"
+              onClick={handleReload}
+              disabled={loading}
+              className="w-full px-4 py-2 bg-[#8b6f47] hover:bg-[#a08759] disabled:bg-[#3d3530] text-white rounded"
             >
-              Reload Splat
+              {loading ? 'Loading...' : 'Reload Splat'}
             </button>
           </div>
         )}
