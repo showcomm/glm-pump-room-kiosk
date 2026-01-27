@@ -49,8 +49,6 @@ function PumpRoomSplat({ src }: { src: string }) {
 
   console.log('Splat rendering with asset:', asset)
   
-  // Rotation to fix upside-down model if needed
-  // Try [180, 0, 0] if model is upside down
   return (
     <Entity position={[0, 0, 0]} rotation={[0, 0, 0]}>
       <GSplat asset={asset} />
@@ -81,7 +79,6 @@ function CameraCaptureHelper() {
       }
     }
     
-    // Manual capture for button/console
     const captureCamera = () => {
       const data = getCameraData()
       if (data) {
@@ -90,7 +87,6 @@ function CameraCaptureHelper() {
       return data
     }
     
-    // Continuous update loop for live display
     const updateLoop = () => {
       const data = getCameraData()
       if (data) {
@@ -137,7 +133,6 @@ function CameraInfoPanel() {
     }
   }
 
-  // Clean up -0 display
   const formatNum = (v: number, decimals: number) => {
     const rounded = Number(v.toFixed(decimals))
     return Object.is(rounded, -0) ? '0' : rounded.toFixed(decimals)
@@ -145,7 +140,7 @@ function CameraInfoPanel() {
 
   return (
     <div 
-      className="absolute bg-black/70 text-white p-4 rounded-lg font-mono text-sm z-20"
+      className="absolute bg-black/70 text-white p-4 rounded-lg font-mono text-sm z-30"
       style={{ top: FRAME_WIDTH + 16, left: FRAME_WIDTH + 16 }}
     >
       <div className="text-gray-400 mb-2">Camera (Live)</div>
@@ -163,17 +158,138 @@ function CameraInfoPanel() {
 }
 
 // ============================================
+// Frame Overlay - sits on top of canvas for depth effect
+// ============================================
+function FrameOverlay() {
+  return (
+    <div 
+      className="absolute inset-0 z-20 pointer-events-none"
+      style={{
+        // Outer bevel - darker at bottom/right, lighter at top/left
+        background: `
+          linear-gradient(to bottom, #3a3a3a 0%, #1a1a1a 50%, #0a0a0a 100%)
+        `,
+      }}
+    >
+      {/* Inner cutout with bevel effect */}
+      <div 
+        className="absolute"
+        style={{
+          top: FRAME_WIDTH,
+          left: FRAME_WIDTH,
+          right: FRAME_WIDTH,
+          bottom: FRAME_WIDTH,
+          // Inner shadow creates the "looking down into" effect
+          boxShadow: `
+            inset 0 4px 12px rgba(0, 0, 0, 0.8),
+            inset 0 2px 4px rgba(0, 0, 0, 0.6),
+            inset 0 0 20px rgba(0, 0, 0, 0.4)
+          `,
+          // Subtle inner border highlight
+          border: '1px solid rgba(60, 60, 60, 0.5)',
+          borderRadius: '2px',
+        }}
+      />
+      
+      {/* Top edge highlight (light hitting from above) */}
+      <div 
+        className="absolute"
+        style={{
+          top: 0,
+          left: 0,
+          right: 0,
+          height: FRAME_WIDTH,
+          background: 'linear-gradient(to bottom, rgba(80, 80, 80, 0.4) 0%, transparent 100%)',
+          borderBottom: '1px solid rgba(40, 40, 40, 0.8)',
+        }}
+      />
+      
+      {/* Bottom edge shadow (shadow underneath) */}
+      <div 
+        className="absolute"
+        style={{
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: FRAME_WIDTH,
+          background: 'linear-gradient(to top, rgba(0, 0, 0, 0.6) 0%, transparent 100%)',
+          borderTop: '1px solid rgba(20, 20, 20, 0.9)',
+        }}
+      />
+      
+      {/* Left edge - subtle highlight */}
+      <div 
+        className="absolute"
+        style={{
+          top: FRAME_WIDTH,
+          left: 0,
+          bottom: FRAME_WIDTH,
+          width: FRAME_WIDTH,
+          background: 'linear-gradient(to right, rgba(60, 60, 60, 0.3) 0%, transparent 100%)',
+          borderRight: '1px solid rgba(30, 30, 30, 0.8)',
+        }}
+      />
+      
+      {/* Right edge - darker shadow */}
+      <div 
+        className="absolute"
+        style={{
+          top: FRAME_WIDTH,
+          right: 0,
+          bottom: FRAME_WIDTH,
+          width: FRAME_WIDTH,
+          background: 'linear-gradient(to left, rgba(0, 0, 0, 0.4) 0%, transparent 100%)',
+          borderLeft: '1px solid rgba(20, 20, 20, 0.9)',
+        }}
+      />
+    </div>
+  )
+}
+
+// ============================================
 // Main Test Component
 // ============================================
 export default function SplatTest() {
   return (
-    <div className="w-screen h-screen bg-black relative" style={{ padding: FRAME_WIDTH }}>
-      {/* Camera debug panel - positioned relative to frame */}
+    <div className="w-screen h-screen bg-black relative">
+      {/* PlayCanvas Application - full screen behind everything */}
+      <div className="absolute inset-0" style={{ 
+        top: FRAME_WIDTH, 
+        left: FRAME_WIDTH, 
+        right: FRAME_WIDTH, 
+        bottom: FRAME_WIDTH 
+      }}>
+        <Application
+          graphicsDeviceOptions={{ antialias: false }}
+        >
+          <Entity 
+            name="camera" 
+            position={INITIAL_CAMERA.position}
+            rotation={INITIAL_CAMERA.rotation}
+          >
+            <Camera 
+              clearColor="#1a1a2e"
+              fov={60}
+              farClip={1000}
+              nearClip={0.01}
+            />
+            <Script script={CameraControls} />
+          </Entity>
+
+          <PumpRoomSplat src={SPLAT_URL} />
+          <CameraCaptureHelper />
+        </Application>
+      </div>
+
+      {/* Frame overlay - sits on top of canvas */}
+      <FrameOverlay />
+
+      {/* Camera debug panel */}
       <CameraInfoPanel />
 
-      {/* Instructions - positioned relative to frame */}
+      {/* Instructions */}
       <div 
-        className="absolute bg-black/70 text-white p-4 rounded-lg text-sm z-20"
+        className="absolute bg-black/70 text-white p-4 rounded-lg text-sm z-30"
         style={{ bottom: FRAME_WIDTH + 16, right: FRAME_WIDTH + 16 }}
       >
         <div className="text-gray-400 mb-1">Controls:</div>
@@ -181,32 +297,6 @@ export default function SplatTest() {
         <div>Middle drag: Pan</div>
         <div>Scroll: Zoom</div>
       </div>
-
-      {/* PlayCanvas Application - fills the space inside the frame */}
-      <Application
-        graphicsDeviceOptions={{ antialias: false }}
-      >
-        {/* Camera with CameraControls script */}
-        <Entity 
-          name="camera" 
-          position={INITIAL_CAMERA.position}
-          rotation={INITIAL_CAMERA.rotation}
-        >
-          <Camera 
-            clearColor="#1a1a2e"
-            fov={60}
-            farClip={1000}
-            nearClip={0.01}
-          />
-          <Script script={CameraControls} />
-        </Entity>
-
-        {/* The splat model */}
-        <PumpRoomSplat src={SPLAT_URL} />
-        
-        {/* Helper to expose camera capture */}
-        <CameraCaptureHelper />
-      </Application>
     </div>
   )
 }
