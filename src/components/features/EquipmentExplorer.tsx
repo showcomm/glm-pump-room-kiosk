@@ -1,6 +1,8 @@
-import { useState } from 'react'
-import { Viewer } from '@playcanvas/blocks'
+import { useState, useEffect, useRef } from 'react'
 import { BackButton } from '../shared/BackButton'
+
+// Import PlayCanvas blocks - registers web components
+import '@playcanvas/blocks'
 
 interface EquipmentExplorerProps {
   onBack: () => void
@@ -8,10 +10,10 @@ interface EquipmentExplorerProps {
 
 export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
   const [plyPath, setPlyPath] = useState('/splats/export_10000.ply')
-  const [loadedPath, setLoadedPath] = useState('/splats/export_10000.ply')
+  const [loadKey, setLoadKey] = useState(0)
 
   const loadSplat = () => {
-    setLoadedPath(plyPath)
+    setLoadKey(k => k + 1)
   }
 
   return (
@@ -23,12 +25,12 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Viewer */}
+        {/* Viewer - PlayCanvas web component */}
         <div className="flex-1 relative">
-          <Viewer
-            src={loadedPath}
-            cameraMode="orbit"
-            style={{ width: '100%', height: '100%' }}
+          <pc-splat-viewer
+            key={loadKey}
+            src={plyPath}
+            style={{ width: '100%', height: '100%', display: 'block' }}
           />
         </div>
 
@@ -61,4 +63,16 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
       </div>
     </div>
   )
+}
+
+// Declare the web component for TypeScript
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      'pc-splat-viewer': React.DetailedHTMLProps<
+        React.HTMLAttributes<HTMLElement> & { src?: string },
+        HTMLElement
+      >
+    }
+  }
 }
