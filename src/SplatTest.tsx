@@ -18,6 +18,9 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs'
 // ============================================
 const SPLAT_URL = '/pump-room.ply'
 
+// Frame width in pixels (black border around viewport)
+const FRAME_WIDTH = 24
+
 // ============================================
 // Splat Component
 // ============================================
@@ -51,7 +54,6 @@ function PumpRoomSplat({ src }: { src: string }) {
 
 // ============================================
 // Camera Capture Helper - exposes capture function to window
-// CHANGE 1: Added continuous position updates via requestAnimationFrame
 // ============================================
 function CameraCaptureHelper() {
   const app = useApp()
@@ -107,7 +109,6 @@ function CameraCaptureHelper() {
 
 // ============================================
 // Camera Info Panel UI
-// CHANGE 1: Listen for continuous updates instead of just captures
 // ============================================
 function CameraInfoPanel() {
   const [cameraData, setCameraData] = useState({ pos: [0, 2, 5], rot: [0, 0, 0] })
@@ -116,7 +117,6 @@ function CameraInfoPanel() {
     const handler = (e: CustomEvent) => {
       setCameraData(e.detail)
     }
-    // Listen for continuous updates
     window.addEventListener('camera-update', handler as EventListener)
     return () => window.removeEventListener('camera-update', handler as EventListener)
   }, [])
@@ -125,15 +125,23 @@ function CameraInfoPanel() {
     if ((window as any).captureCamera) {
       const data = (window as any).captureCamera()
       if (data) {
-        // Copy to clipboard as JSON
         navigator.clipboard.writeText(JSON.stringify(data, null, 2))
         console.log('Copied to clipboard')
       }
     }
   }
 
+  // Clean up -0 display
+  const formatNum = (v: number, decimals: number) => {
+    const rounded = Number(v.toFixed(decimals))
+    return Object.is(rounded, -0) ? '0' : rounded.toFixed(decimals)
+  }
+
   return (
-    <div className="absolute top-4 left-4 bg-black/70 text-white p-4 rounded-lg font-mono text-sm z-20">
+    <div 
+      className="absolute bg-black/70 text-white p-4 rounded-lg font-mono text-sm z-20"
+      style={{ top: FRAME_WIDTH + 16, left: FRAME_WIDTH + 16 }}
+    >
       <div className="text-gray-400 mb-2">Camera (Live)</div>
       <button 
         onClick={handleCapture}
@@ -141,8 +149,8 @@ function CameraInfoPanel() {
       >
         Copy to Clipboard
       </button>
-      <div>Pos: [{cameraData.pos.map(v => v.toFixed(2)).join(', ')}]</div>
-      <div>Rot: [{cameraData.rot.map(v => v.toFixed(1)).join(', ')}]</div>
+      <div>Pos: [{cameraData.pos.map(v => formatNum(v, 2)).join(', ')}]</div>
+      <div>Rot: [{cameraData.rot.map(v => formatNum(v, 1)).join(', ')}]</div>
       <div className="text-gray-500 text-xs mt-2">Console: captureCamera()</div>
     </div>
   )
@@ -153,19 +161,22 @@ function CameraInfoPanel() {
 // ============================================
 export default function SplatTest() {
   return (
-    <div className="w-screen h-screen bg-black relative">
-      {/* Camera debug panel */}
+    <div className="w-screen h-screen bg-black relative" style={{ padding: FRAME_WIDTH }}>
+      {/* Camera debug panel - positioned relative to frame */}
       <CameraInfoPanel />
 
-      {/* Instructions */}
-      <div className="absolute bottom-4 right-4 bg-black/70 text-white p-4 rounded-lg text-sm z-20">
+      {/* Instructions - positioned relative to frame */}
+      <div 
+        className="absolute bg-black/70 text-white p-4 rounded-lg text-sm z-20"
+        style={{ bottom: FRAME_WIDTH + 16, right: FRAME_WIDTH + 16 }}
+      >
         <div className="text-gray-400 mb-1">Controls:</div>
         <div>Left drag: Orbit</div>
         <div>Middle drag: Pan</div>
         <div>Scroll: Zoom</div>
       </div>
 
-      {/* PlayCanvas Application */}
+      {/* PlayCanvas Application - fills the space inside the frame */}
       <Application
         graphicsDeviceOptions={{ antialias: false }}
       >
