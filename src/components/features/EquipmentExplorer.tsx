@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
-import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d'
+import { useState, useRef } from 'react'
+import { Canvas, useThree, useFrame } from '@react-three/fiber'
+import { Splat, OrbitControls } from '@react-three/drei'
 import { BackButton } from '../shared/BackButton'
+import * as THREE from 'three'
 
 interface EquipmentExplorerProps {
   onBack: () => void
@@ -15,140 +17,73 @@ const CAMERA_PRESETS = [
   { name: 'Close Up', position: [0, 1.5, 3], target: [0, 1, 0] },
 ]
 
-export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
-  const wrapperRef = useRef<HTMLDivElement>(null)
-  const viewerContainerRef = useRef<HTMLDivElement | null>(null)
-  const viewerRef = useRef<any>(null)
-  const initializedRef = useRef(false)
+// Component to track camera position
+function CameraTracker({ onCameraUpdate }: { onCameraUpdate: (pos: number[], target: number[]) => void }) {
+  const { camera } = useThree()
+  const controlsRef = useRef<any>(null)
   
-  const [plyPath, setPlyPath] = useState('/splats/export_10000.ply')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [cameraInfo, setCameraInfo] = useState({ position: [0, 0, 0], target: [0, 0, 0] })
-
-  // Update camera info display
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (viewerRef.current?.camera && viewerRef.current?.controls) {
-        const cam = viewerRef.current.camera
-        const ctrl = viewerRef.current.controls
-        setCameraInfo({
-          position: [
-            parseFloat(cam.position.x.toFixed(2)),
-            parseFloat(cam.position.y.toFixed(2)),
-            parseFloat(cam.position.z.toFixed(2))
-          ],
-          target: [
-            parseFloat(ctrl.target.x.toFixed(2)),
-            parseFloat(ctrl.target.y.toFixed(2)),
-            parseFloat(ctrl.target.z.toFixed(2))
-          ]
-        })
-      }
-    }, 200)
-    return () => clearInterval(interval)
-  }, [])
-
-  // Load splat
-  const loadSplat = (path: string) => {
-    if (!wrapperRef.current) return
-    
-    // Clean up previous viewer
-    if (viewerRef.current) {
-      try {
-        viewerRef.current.dispose()
-      } catch (e) {
-        // ignore
-      }
-      viewerRef.current = null
+  useFrame(() => {
+    if (camera && controlsRef.current) {
+      const target = controlsRef.current.target
+      onCameraUpdate(
+        [
+          parseFloat(camera.position.x.toFixed(2)),
+          parseFloat(camera.position.y.toFixed(2)),
+          parseFloat(camera.position.z.toFixed(2))
+        ],
+        [
+          parseFloat(target.x.toFixed(2)),
+          parseFloat(target.y.toFixed(2)),
+          parseFloat(target.z.toFixed(2))
+        ]
+      )
     }
-    
-    // Remove old container if exists
-    if (viewerContainerRef.current && wrapperRef.current.contains(viewerContainerRef.current)) {
-      wrapperRef.current.removeChild(viewerContainerRef.current)
-    }
-    
-    // Create fresh container for the library (not managed by React)
-    const container = document.createElement('div')
-    container.style.width = '100%'
-    container.style.height = '100%'
-    wrapperRef.current.appendChild(container)
-    viewerContainerRef.current = container
+  })
+  
+  return (
+    <OrbitControls
+      ref={controlsRef}
+      enableDamping
+      dampingFactor={0.1}
+      minDistance={0.5}
+      maxDistance={50}
+    />
+  )
+}
 
-    setLoading(true)
-    setError(null)
-
-    const viewer = new GaussianSplats3D.Viewer({
-      cameraUp: [0, 1, 0],
-      initialCameraPosition: [0, 2, 8],
-      initialCameraLookAt: [0, 0, 0],
-      rootElement: container,
-      sharedMemoryForWorkers: false,
-      selfDrivenMode: true,
-      useBuiltInControls: true,
-    })
-
-    viewerRef.current = viewer
-
-    viewer.addSplatScene(path, {
-      splatAlphaRemovalThreshold: 5,
-      showLoadingUI: true,
-      progressiveLoad: true,
-    })
-    .then(() => {
-      console.log('Splat loaded!')
-      
-      // Remove rotation restrictions
-      const controls = viewer.controls
-      if (controls) {
-        controls.minAzimuthAngle = -Infinity
-        controls.maxAzimuthAngle = Infinity
-        controls.minPolarAngle = 0
-        controls.maxPolarAngle = Math.PI
-        controls.enableDamping = true
-        controls.dampingFactor = 0.1
-      }
-      
-      viewer.start()
-      setLoading(false)
-    })
-    .catch((err: Error) => {
-      console.error('Failed to load splat:', err)
-      setError(err.message)
-      setLoading(false)
-    })
-  }
-
-  // Initial load
-  useEffect(() => {
-    if (initializedRef.current) return
-    initializedRef.current = true
-    loadSplat(plyPath)
-    
-    // Cleanup on unmount
-    return () => {
-      if (viewerRef.current) {
-        try {
-          viewerRef.current.dispose()
-        } catch (e) {
-          // ignore
-        }
-      }
-    }
-  }, [])
-
-  // Move camera to preset
-  const moveCameraTo = (preset: typeof CAMERA_PRESETS[0]) => {
-    if (viewerRef.current?.camera && viewerRef.current?.controls) {
-      const camera = viewerRef.current.camera
-      const controls = viewerRef.current.controls
+// Camera controller for presets
+function CameraController({ preset }: { preset: { position: number[], target: number[] } | null }) {
+  const { camera } = useThree()
+  
+  useFrame(() => {
+    if (preset) {
       camera.position.set(preset.position[0], preset.position[1], preset.position[2])
-      controls.target.set(preset.target[0], preset.target[1], preset.target[2])
-      controls.update()
     }
+  })
+  
+  return null
+}
+
+export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
+  const [plyPath, setPlyPath] = useState('/splats/export_10000.ply')
+  const [loadedPath, setLoadedPath] = useState('/splats/export_10000.ply')
+  const [cameraInfo, setCameraInfo] = useState({ position: [0, 2, 8], target: [0, 0, 0] })
+  const [activePreset, setActivePreset] = useState<typeof CAMERA_PRESETS[0] | null>(null)
+
+  const handleCameraUpdate = (pos: number[], target: number[]) => {
+    setCameraInfo({ position: pos, target })
   }
 
-  // Copy camera position
+  const loadSplat = () => {
+    setLoadedPath(plyPath)
+  }
+
+  const moveCameraTo = (preset: typeof CAMERA_PRESETS[0]) => {
+    setActivePreset(preset)
+    // Clear after a frame so it doesn't keep resetting
+    setTimeout(() => setActivePreset(null), 100)
+  }
+
   const copyCameraPosition = () => {
     const code = `{ position: [${cameraInfo.position.join(', ')}], target: [${cameraInfo.target.join(', ')}] }`
     navigator.clipboard.writeText(code)
@@ -163,38 +98,31 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Viewer wrapper - we manually manage children here */}
+        {/* 3D Viewer */}
         <div className="flex-1 relative">
-          <div ref={wrapperRef} className="absolute inset-0" />
-          
-          {loading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-[#1f1c1a] z-20 pointer-events-none">
-              <div className="text-center">
-                <div className="w-12 h-12 border-4 border-[#8b6f47] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-                <p className="text-[#d4c5b0]">Loading...</p>
-              </div>
-            </div>
-          )}
-
-          {error && (
-            <div className="absolute top-4 left-4 right-4 bg-red-900/90 text-white p-4 rounded z-20">
-              <p className="font-semibold">Error: {error}</p>
-            </div>
-          )}
+          <Canvas
+            camera={{ position: [0, 2, 8], fov: 60 }}
+            gl={{ antialias: true }}
+          >
+            <color attach="background" args={['#1a1816']} />
+            
+            <Splat src={loadedPath} />
+            
+            <CameraTracker onCameraUpdate={handleCameraUpdate} />
+            {activePreset && <CameraController preset={activePreset} />}
+          </Canvas>
 
           {/* Camera info overlay */}
-          {!loading && (
-            <div className="absolute bottom-4 left-4 bg-black/80 text-[#d4c5b0] p-3 rounded text-sm font-mono z-10">
-              <p>pos: [{cameraInfo.position.join(', ')}]</p>
-              <p>target: [{cameraInfo.target.join(', ')}]</p>
-              <button
-                onClick={copyCameraPosition}
-                className="mt-2 px-2 py-1 bg-[#8b6f47] hover:bg-[#a08759] rounded text-xs"
-              >
-                Copy
-              </button>
-            </div>
-          )}
+          <div className="absolute bottom-4 left-4 bg-black/80 text-[#d4c5b0] p-3 rounded text-sm font-mono z-10">
+            <p>pos: [{cameraInfo.position.join(', ')}]</p>
+            <p>target: [{cameraInfo.target.join(', ')}]</p>
+            <button
+              onClick={copyCameraPosition}
+              className="mt-2 px-2 py-1 bg-[#8b6f47] hover:bg-[#a08759] rounded text-xs"
+            >
+              Copy
+            </button>
+          </div>
         </div>
 
         {/* Control Panel */}
@@ -209,9 +137,8 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
               className="w-full px-3 py-2 bg-[#1f1c1a] text-[#d4c5b0] border border-[#3d3530] rounded text-sm mb-2"
             />
             <button
-              onClick={() => loadSplat(plyPath)}
-              disabled={loading}
-              className="w-full px-3 py-2 bg-[#8b6f47] hover:bg-[#a08759] disabled:bg-[#3d3530] text-white rounded text-sm"
+              onClick={loadSplat}
+              className="w-full px-3 py-2 bg-[#8b6f47] hover:bg-[#a08759] text-white rounded text-sm"
             >
               Load
             </button>
