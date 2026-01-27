@@ -11,20 +11,20 @@ interface EquipmentExplorerProps {
 export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
   const [plyPath, setPlyPath] = useState('/splats/export_10000.ply')
   const [currentSrc, setCurrentSrc] = useState('/splats/export_10000.ply')
-  const viewerRef = useRef<HTMLElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
 
   const loadSplat = () => {
     console.log('Loading splat:', plyPath)
     setCurrentSrc(plyPath)
   }
 
-  // Update the web component's src attribute when currentSrc changes
+  // Log container dimensions to debug sizing issues
   useEffect(() => {
-    if (viewerRef.current) {
-      console.log('Setting viewer src to:', currentSrc)
-      viewerRef.current.setAttribute('src', currentSrc)
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect()
+      console.log('Container dimensions:', rect.width, 'x', rect.height)
     }
-  }, [currentSrc])
+  }, [])
 
   return (
     <div className="w-full h-full flex flex-col bg-[#1f1c1a]">
@@ -36,12 +36,23 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Viewer - PlayCanvas web component */}
-        <div className="flex-1 relative bg-black">
+        <div 
+          ref={containerRef}
+          className="flex-1 relative"
+          style={{ minHeight: '400px', background: '#000' }}
+        >
           <pc-splat-viewer
-            ref={viewerRef}
             src={currentSrc}
-            camera-controls
-            style={{ width: '100%', height: '100%', display: 'block' }}
+            style={{ 
+              width: '100%', 
+              height: '100%', 
+              display: 'block',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0
+            }}
           />
         </div>
 
@@ -65,6 +76,21 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
             <p className="text-[#d4c5b0]/40 text-xs mt-2">Current: {currentSrc}</p>
           </section>
 
+          {/* Quick test with known working URL */}
+          <section className="mb-6">
+            <h3 className="text-[#8b6f47] font-semibold mb-2">Test Files</h3>
+            <button
+              onClick={() => {
+                const testUrl = 'https://raw.githubusercontent.com/playcanvas/model-viewer/main/examples/assets/bonsai.sogs'
+                setPlyPath(testUrl)
+                setCurrentSrc(testUrl)
+              }}
+              className="w-full px-3 py-2 bg-[#3d3530] hover:bg-[#4d4540] text-[#d4c5b0] rounded text-sm mb-2"
+            >
+              Load Demo (bonsai)
+            </button>
+          </section>
+
           {/* Controls hint */}
           <section className="text-[#d4c5b0]/60 text-xs">
             <p>🖱️ Left-drag: Rotate</p>
@@ -84,8 +110,6 @@ declare global {
       'pc-splat-viewer': React.DetailedHTMLProps<
         React.HTMLAttributes<HTMLElement> & { 
           src?: string
-          'camera-controls'?: boolean
-          ref?: React.Ref<HTMLElement>
         },
         HTMLElement
       >
