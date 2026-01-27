@@ -16,7 +16,8 @@ const CAMERA_PRESETS = [
 ]
 
 export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const viewerContainerRef = useRef<HTMLDivElement | null>(null)
   const viewerRef = useRef<any>(null)
   const initializedRef = useRef(false)
   
@@ -50,7 +51,7 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
 
   // Load splat
   const loadSplat = (path: string) => {
-    if (!containerRef.current) return
+    if (!wrapperRef.current) return
     
     // Clean up previous viewer
     if (viewerRef.current) {
@@ -62,11 +63,17 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
       viewerRef.current = null
     }
     
-    // Clear container
-    const container = containerRef.current
-    while (container.firstChild) {
-      container.removeChild(container.firstChild)
+    // Remove old container if exists
+    if (viewerContainerRef.current && wrapperRef.current.contains(viewerContainerRef.current)) {
+      wrapperRef.current.removeChild(viewerContainerRef.current)
     }
+    
+    // Create fresh container for the library (not managed by React)
+    const container = document.createElement('div')
+    container.style.width = '100%'
+    container.style.height = '100%'
+    wrapperRef.current.appendChild(container)
+    viewerContainerRef.current = container
 
     setLoading(true)
     setError(null)
@@ -117,6 +124,17 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
     if (initializedRef.current) return
     initializedRef.current = true
     loadSplat(plyPath)
+    
+    // Cleanup on unmount
+    return () => {
+      if (viewerRef.current) {
+        try {
+          viewerRef.current.dispose()
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
   }, [])
 
   // Move camera to preset
@@ -145,10 +163,12 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Viewer */}
-        <div className="flex-1 relative" ref={containerRef}>
+        {/* Viewer wrapper - we manually manage children here */}
+        <div className="flex-1 relative">
+          <div ref={wrapperRef} className="absolute inset-0" />
+          
           {loading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-[#1f1c1a] z-20">
+            <div className="absolute inset-0 flex items-center justify-center bg-[#1f1c1a] z-20 pointer-events-none">
               <div className="text-center">
                 <div className="w-12 h-12 border-4 border-[#8b6f47] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
                 <p className="text-[#d4c5b0]">Loading...</p>
