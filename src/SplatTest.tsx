@@ -1,17 +1,13 @@
 /**
  * Minimal PlayCanvas React Gaussian Splat Test
  * 
- * This is a clean-room implementation to verify splat loading works
- * before integrating into the full kiosk application.
- * 
  * Usage:
  * 1. Place your .ply file in /public (e.g., /public/pump-room.ply)
  * 2. Update SPLAT_URL below to match your filename
- * 3. In main.tsx, change `import App from './App'` to `import App from './SplatTest'`
- * 4. Run `npm run dev`
+ * 3. Run `npm run dev`
  */
 
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat, Script } from '@playcanvas/react/components'
 import { useSplat } from '@playcanvas/react/hooks'
@@ -25,38 +21,29 @@ const SPLAT_URL = '/pump-room.ply'
 // ============================================
 // Splat Component
 // ============================================
-function PumpRoomSplat({ src }: { src: string }) {
+function PumpRoomSplat({ src, onLoaded }: { src: string; onLoaded?: () => void }) {
   const { asset, loading, error } = useSplat(src)
+  const loadedRef = useRef(false)
+  
+  useEffect(() => {
+    if (error) {
+      console.error('Splat load error:', error)
+    }
+    if (asset && !loading && !loadedRef.current) {
+      loadedRef.current = true
+      console.log('Splat loaded successfully!')
+      onLoaded?.()
+    }
+  }, [asset, loading, error, onLoaded])
 
-  if (error) {
-    console.error('Splat load error:', error)
+  if (error || loading || !asset) {
     return null
-  }
-
-  if (loading || !asset) {
-    return null // Loading state handled by parent
   }
 
   return (
     <Entity position={[0, 0, 0]}>
       <GSplat asset={asset} />
     </Entity>
-  )
-}
-
-// ============================================
-// Loading Overlay
-// ============================================
-function LoadingOverlay({ visible }: { visible: boolean }) {
-  if (!visible) return null
-  
-  return (
-    <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
-      <div className="text-white text-center">
-        <div className="text-2xl mb-2">Loading Splat...</div>
-        <div className="text-sm text-gray-400">{SPLAT_URL}</div>
-      </div>
-    </div>
   )
 }
 
@@ -97,19 +84,19 @@ function CameraInfoPanel({ cameraRef }: { cameraRef: React.RefObject<any> }) {
 // ============================================
 export default function SplatTest() {
   const cameraRef = useRef(null)
-  const [isLoading, setIsLoading] = useState(true)
-
-  // Simple loading detection - hide after a delay
-  // In production, use useSplat's loading state
-  useState(() => {
-    const timer = setTimeout(() => setIsLoading(false), 3000)
-    return () => clearTimeout(timer)
-  })
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
 
   return (
     <div className="w-screen h-screen bg-black relative">
-      {/* Loading overlay */}
-      <LoadingOverlay visible={isLoading} />
+      {/* Status overlay */}
+      {status === 'loading' && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10 pointer-events-none">
+          <div className="text-white text-center">
+            <div className="text-2xl mb-2">Loading Splat...</div>
+            <div className="text-sm text-gray-400">{SPLAT_URL}</div>
+          </div>
+        </div>
+      )}
       
       {/* Camera debug panel */}
       <CameraInfoPanel cameraRef={cameraRef} />
@@ -140,7 +127,10 @@ export default function SplatTest() {
         </Entity>
 
         {/* The splat model */}
-        <PumpRoomSplat src={SPLAT_URL} />
+        <PumpRoomSplat 
+          src={SPLAT_URL} 
+          onLoaded={() => setStatus('ready')}
+        />
       </Application>
     </div>
   )
