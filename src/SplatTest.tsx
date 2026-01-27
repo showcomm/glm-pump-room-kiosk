@@ -7,7 +7,7 @@
  * 3. Run `npm run dev`
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat, Script } from '@playcanvas/react/components'
 import { useSplat, useApp } from '@playcanvas/react/hooks'
@@ -51,38 +51,54 @@ function PumpRoomSplat({ src }: { src: string }) {
 
 // ============================================
 // Camera Capture Helper - exposes capture function to window
+// CHANGE 1: Added continuous position updates via requestAnimationFrame
 // ============================================
 function CameraCaptureHelper() {
   const app = useApp()
+  const frameRef = useRef<number>()
   
   useEffect(() => {
     if (!app) return
     
-    const captureCamera = () => {
+    const getCameraData = () => {
       const cameraEntity = app.root.findByName('camera')
-      if (!cameraEntity) {
-        console.log('Camera entity not found')
-        return null
-      }
+      if (!cameraEntity) return null
       
       const pos = cameraEntity.getPosition()
       const rot = cameraEntity.getEulerAngles()
       
-      const data = {
+      return {
         pos: [pos.x, pos.y, pos.z],
         rot: [rot.x, rot.y, rot.z]
       }
-      
-      console.log('Camera captured:', data)
-      window.dispatchEvent(new CustomEvent('camera-captured', { detail: data }))
-      
+    }
+    
+    // Manual capture for button/console
+    const captureCamera = () => {
+      const data = getCameraData()
+      if (data) {
+        console.log('Camera captured:', data)
+      }
       return data
     }
     
+    // Continuous update loop for live display
+    const updateLoop = () => {
+      const data = getCameraData()
+      if (data) {
+        window.dispatchEvent(new CustomEvent('camera-update', { detail: data }))
+      }
+      frameRef.current = requestAnimationFrame(updateLoop)
+    }
+    
     ;(window as any).captureCamera = captureCamera
+    frameRef.current = requestAnimationFrame(updateLoop)
     
     return () => {
       delete (window as any).captureCamera
+      if (frameRef.current) {
+        cancelAnimationFrame(frameRef.current)
+      }
     }
   }, [app])
   
@@ -91,6 +107,7 @@ function CameraCaptureHelper() {
 
 // ============================================
 // Camera Info Panel UI
+// CHANGE 1: Listen for continuous updates instead of just captures
 // ============================================
 function CameraInfoPanel() {
   const [cameraData, setCameraData] = useState({ pos: [0, 2, 5], rot: [0, 0, 0] })
@@ -99,24 +116,30 @@ function CameraInfoPanel() {
     const handler = (e: CustomEvent) => {
       setCameraData(e.detail)
     }
-    window.addEventListener('camera-captured', handler as EventListener)
-    return () => window.removeEventListener('camera-captured', handler as EventListener)
+    // Listen for continuous updates
+    window.addEventListener('camera-update', handler as EventListener)
+    return () => window.removeEventListener('camera-update', handler as EventListener)
   }, [])
   
   const handleCapture = () => {
     if ((window as any).captureCamera) {
-      (window as any).captureCamera()
+      const data = (window as any).captureCamera()
+      if (data) {
+        // Copy to clipboard as JSON
+        navigator.clipboard.writeText(JSON.stringify(data, null, 2))
+        console.log('Copied to clipboard')
+      }
     }
   }
 
   return (
     <div className="absolute top-4 left-4 bg-black/70 text-white p-4 rounded-lg font-mono text-sm z-20">
-      <div className="text-gray-400 mb-2">Camera</div>
+      <div className="text-gray-400 mb-2">Camera (Live)</div>
       <button 
         onClick={handleCapture}
         className="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded mb-3 w-full"
       >
-        Capture Position
+        Copy to Clipboard
       </button>
       <div>Pos: [{cameraData.pos.map(v => v.toFixed(2)).join(', ')}]</div>
       <div>Rot: [{cameraData.rot.map(v => v.toFixed(1)).join(', ')}]</div>
