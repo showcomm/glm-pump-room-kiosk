@@ -96,21 +96,21 @@
       if (headerEndIndex === -1) throw new Error('Invalid PLY');
       
       const header = headerText.substring(0, headerEndIndex);
-      const formatMatch = header.match(/format (\\w+)/);
+      const formatMatch = header.match(/format (\w+)/);
       const format = formatMatch ? formatMatch[1] : 'ascii';
       
-      const vertexMatch = header.match(/element vertex (\\d+)/);
+      const vertexMatch = header.match(/element vertex (\d+)/);
       if (!vertexMatch) throw new Error('No vertex count');
       const vertexCount = parseInt(vertexMatch[1]);
       
       const properties = [];
-      const propRegex = /property (\\w+) (\\w+)/g;
+      const propRegex = /property (\w+) (\w+)/g;
       let match;
       while ((match = propRegex.exec(header)) !== null) {
         properties.push({ type: match[1], name: match[2] });
       }
       
-      const newlineAfterHeader = headerText.indexOf('\\n', headerEndIndex);
+      const newlineAfterHeader = headerText.indexOf('\n', headerEndIndex);
       const dataStartByte = newlineAfterHeader + 1;
       
       const propSizes = { 'float': 4, 'float32': 4, 'uchar': 1, 'uint8': 1 };
