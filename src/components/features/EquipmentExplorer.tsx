@@ -1,6 +1,5 @@
-import { useState, Suspense } from 'react'
+import { useState, useRef } from 'react'
 import { BackButton } from '../shared/BackButton'
-import { Viewer } from '@playcanvas/blocks'
 
 interface EquipmentExplorerProps {
   onBack: () => void
@@ -8,11 +7,13 @@ interface EquipmentExplorerProps {
 
 export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
   const [plyPath, setPlyPath] = useState('/splats/export_10000.ply')
-  const [currentSrc, setCurrentSrc] = useState('/splats/export_10000.ply')
+  const iframeRef = useRef<HTMLIFrameElement>(null)
 
   const loadSplat = () => {
-    console.log('Loading splat:', plyPath)
-    setCurrentSrc(plyPath)
+    // Reload iframe with new path as query param
+    if (iframeRef.current) {
+      iframeRef.current.src = `/tests/splat-viewer.html?src=${encodeURIComponent(plyPath)}`
+    }
   }
 
   return (
@@ -24,25 +25,14 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Viewer - needs explicit dimensions */}
-        <div 
-          className="flex-1 relative"
-          style={{ 
-            minHeight: '400px',
-            background: '#000'
-          }}
-        >
-          <div style={{ position: 'absolute', inset: 0 }}>
-            <Suspense fallback={<div className="text-white p-4">Loading viewer...</div>}>
-              <Viewer.Splat 
-                key={currentSrc}
-                src={currentSrc}
-                style={{ width: '100%', height: '100%' }}
-              >
-                <Viewer.Progress />
-              </Viewer.Splat>
-            </Suspense>
-          </div>
+        {/* Viewer - iframe embedding the working HTML viewer */}
+        <div className="flex-1 relative bg-black">
+          <iframe
+            ref={iframeRef}
+            src={`/tests/splat-viewer.html?src=${encodeURIComponent(plyPath)}`}
+            className="w-full h-full border-0"
+            title="Splat Viewer"
+          />
         </div>
 
         {/* Control Panel */}
@@ -62,21 +52,32 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
             >
               Load
             </button>
-            <p className="text-[#d4c5b0]/40 text-xs mt-2">Current: {currentSrc}</p>
           </section>
 
-          {/* Quick test with known working URL */}
+          {/* Quick presets */}
           <section className="mb-6">
-            <h3 className="text-[#8b6f47] font-semibold mb-2">Test Files</h3>
+            <h3 className="text-[#8b6f47] font-semibold mb-2">Presets</h3>
             <button
               onClick={() => {
-                const testUrl = 'https://raw.githubusercontent.com/playcanvas/model-viewer/main/examples/assets/bonsai.sogs'
-                setPlyPath(testUrl)
-                setCurrentSrc(testUrl)
+                setPlyPath('/splats/export_10000.ply')
+                if (iframeRef.current) {
+                  iframeRef.current.src = `/tests/splat-viewer.html?src=${encodeURIComponent('/splats/export_10000.ply')}`
+                }
               }}
               className="w-full px-3 py-2 bg-[#3d3530] hover:bg-[#4d4540] text-[#d4c5b0] rounded text-sm mb-2"
             >
-              Load Demo (bonsai)
+              10k Steps
+            </button>
+            <button
+              onClick={() => {
+                setPlyPath('/splats/export_30000.ply')
+                if (iframeRef.current) {
+                  iframeRef.current.src = `/tests/splat-viewer.html?src=${encodeURIComponent('/splats/export_30000.ply')}`
+                }
+              }}
+              className="w-full px-3 py-2 bg-[#3d3530] hover:bg-[#4d4540] text-[#d4c5b0] rounded text-sm mb-2"
+            >
+              30k Steps
             </button>
           </section>
 
