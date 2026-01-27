@@ -20,6 +20,8 @@
       font-family: system-ui, sans-serif;
       font-size: 13px;
       z-index: 100;
+      max-width: 600px;
+      word-break: break-all;
     }
     .status.loading { border-left: 3px solid #8b6f47; }
     .status.success { border-left: 3px solid #4ade80; }
@@ -52,12 +54,7 @@
     function setStatus(msg, type = 'loading') {
       statusEl.textContent = msg;
       statusEl.className = 'status ' + type;
-    }
-    
-    function formatBytes(bytes) {
-      if (bytes < 1024) return bytes + ' B';
-      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-      return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+      console.log('[STATUS]', type, msg);
     }
     
     function initThree() {
@@ -75,7 +72,6 @@
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
       
-      // Grid
       scene.add(new THREE.GridHelper(10, 20, 0x3d3530, 0x2a2622));
       scene.add(new THREE.AxesHelper(1));
       
@@ -89,19 +85,35 @@
     }
     
     async function parsePLY(arrayBuffer) {
+      console.log('Buffer size:', arrayBuffer.byteLength);
+      
       const headerView = new Uint8Array(arrayBuffer, 0, Math.min(10000, arrayBuffer.byteLength));
       const headerText = new TextDecoder().decode(headerView);
       
+      // Debug: show first 500 chars of header
+      console.log('Header preview:', headerText.substring(0, 500));
+      
       const headerEndIndex = headerText.indexOf('end_header');
-      if (headerEndIndex === -1) throw new Error('Invalid PLY');
+      if (headerEndIndex === -1) {
+        console.error('No end_header found. First 200 chars:', headerText.substring(0, 200));
+        throw new Error('Invalid PLY: no end_header. First chars: ' + headerText.substring(0, 100));
+      }
       
       const header = headerText.substring(0, headerEndIndex);
+      console.log('Full header:', header);
+      
       const formatMatch = header.match(/format (\w+)/);
       const format = formatMatch ? formatMatch[1] : 'ascii';
+      console.log('Format:', format);
       
       const vertexMatch = header.match(/element vertex (\d+)/);
-      if (!vertexMatch) throw new Error('No vertex count');
+      console.log('Vertex match:', vertexMatch);
+      
+      if (!vertexMatch) {
+        throw new Error('No vertex count found in header');
+      }
       const vertexCount = parseInt(vertexMatch[1]);
+      console.log('Vertex count:', vertexCount);
       
       const properties = [];
       const propRegex = /property (\w+) (\w+)/g;
@@ -109,9 +121,11 @@
       while ((match = propRegex.exec(header)) !== null) {
         properties.push({ type: match[1], name: match[2] });
       }
+      console.log('Properties:', properties);
       
       const newlineAfterHeader = headerText.indexOf('\n', headerEndIndex);
       const dataStartByte = newlineAfterHeader + 1;
+      console.log('Data starts at byte:', dataStartByte);
       
       const propSizes = { 'float': 4, 'float32': 4, 'uchar': 1, 'uint8': 1 };
       let vertexSize = 0;
@@ -120,6 +134,7 @@
         propOffsets[prop.name] = vertexSize;
         vertexSize += propSizes[prop.type] || 4;
       }
+      console.log('Vertex size:', vertexSize, 'Offsets:', propOffsets);
       
       const positions = new Float32Array(vertexCount * 3);
       const colors = new Float32Array(vertexCount * 3);
@@ -184,6 +199,9 @@
       
       try {
         const response = await fetch(url);
+        console.log('Response status:', response.status);
+        console.log('Content-Type:', response.headers.get('content-type'));
+        
         if (!response.ok) throw new Error('HTTP ' + response.status);
         
         setStatus('Parsing PLY...', 'loading');
@@ -201,11 +219,11 @@
         
         setStatus(data.count.toLocaleString() + ' points loaded', 'success');
       } catch (err) {
+        console.error('Load error:', err);
         setStatus('Error: ' + err.message, 'error');
       }
     }
     
-    // Handle resize
     window.addEventListener('resize', () => {
       if (renderer && camera) {
         camera.aspect = window.innerWidth / window.innerHeight;
@@ -214,14 +232,12 @@
       }
     });
     
-    // Listen for messages from parent
     window.addEventListener('message', (e) => {
       if (e.data && e.data.type === 'load' && e.data.src) {
         loadSplat(e.data.src);
       }
     });
     
-    // Initialize and load from query param
     initThree();
     const params = new URLSearchParams(window.location.search);
     const src = params.get('src');
