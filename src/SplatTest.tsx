@@ -7,7 +7,7 @@
  * 3. Run `npm run dev`
  */
 
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState } from 'react'
 import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat, Script } from '@playcanvas/react/components'
 import { useSplat } from '@playcanvas/react/hooks'
@@ -19,27 +19,27 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs'
 const SPLAT_URL = '/pump-room.ply'
 
 // ============================================
-// Splat Component
+// Splat Component - kept simple, no callbacks
 // ============================================
-function PumpRoomSplat({ src, onLoaded }: { src: string; onLoaded?: () => void }) {
+function PumpRoomSplat({ src }: { src: string }) {
   const { asset, loading, error } = useSplat(src)
-  const loadedRef = useRef(false)
   
-  useEffect(() => {
-    if (error) {
-      console.error('Splat load error:', error)
-    }
-    if (asset && !loading && !loadedRef.current) {
-      loadedRef.current = true
-      console.log('Splat loaded successfully!')
-      onLoaded?.()
-    }
-  }, [asset, loading, error, onLoaded])
-
-  if (error || loading || !asset) {
+  if (error) {
+    console.error('Splat load error:', error)
     return null
   }
 
+  if (loading) {
+    console.log('Splat loading...')
+    return null
+  }
+  
+  if (!asset) {
+    return null
+  }
+
+  console.log('Splat rendering with asset:', asset)
+  
   return (
     <Entity position={[0, 0, 0]}>
       <GSplat asset={asset} />
@@ -51,7 +51,7 @@ function PumpRoomSplat({ src, onLoaded }: { src: string; onLoaded?: () => void }
 // Camera Info Panel (for development)
 // ============================================
 function CameraInfoPanel({ cameraRef }: { cameraRef: React.RefObject<any> }) {
-  const [info, setInfo] = useState({ pos: [0, 0, 0], rot: [0, 0, 0] })
+  const [info, setInfo] = useState({ pos: ['0', '0', '0'], rot: ['0', '0', '0'] })
 
   const updateInfo = () => {
     if (cameraRef.current) {
@@ -80,24 +80,13 @@ function CameraInfoPanel({ cameraRef }: { cameraRef: React.RefObject<any> }) {
 }
 
 // ============================================
-// Main Test Component
+// Main Test Component - NO state changes that could cause re-render
 // ============================================
 export default function SplatTest() {
   const cameraRef = useRef(null)
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
 
   return (
     <div className="w-screen h-screen bg-black relative">
-      {/* Status overlay */}
-      {status === 'loading' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10 pointer-events-none">
-          <div className="text-white text-center">
-            <div className="text-2xl mb-2">Loading Splat...</div>
-            <div className="text-sm text-gray-400">{SPLAT_URL}</div>
-          </div>
-        </div>
-      )}
-      
       {/* Camera debug panel */}
       <CameraInfoPanel cameraRef={cameraRef} />
 
@@ -127,10 +116,7 @@ export default function SplatTest() {
         </Entity>
 
         {/* The splat model */}
-        <PumpRoomSplat 
-          src={SPLAT_URL} 
-          onLoaded={() => setStatus('ready')}
-        />
+        <PumpRoomSplat src={SPLAT_URL} />
       </Application>
     </div>
   )
