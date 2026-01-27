@@ -1,34 +1,47 @@
 /**
  * Minimal PlayCanvas React Gaussian Splat Test
- * Stripped down to debug rendering issue
+ * 
+ * Usage:
+ * 1. Place your .ply file in /public (e.g., /public/pump-room.ply)
+ * 2. Update SPLAT_URL below to match your filename
+ * 3. Run `npm run dev`
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat, Script } from '@playcanvas/react/components'
 import { useSplat, useApp } from '@playcanvas/react/hooks'
 import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs'
-import type { Entity as PCEntity } from 'playcanvas'
 
+// ============================================
+// CONFIGURATION - Update this path to your .ply file
+// ============================================
 const SPLAT_URL = '/pump-room.ply'
 
 // ============================================
-// Minimal Splat Component - hardcoded position
+// Splat Component
 // ============================================
-function PumpRoomSplat() {
-  const { asset, loading, error } = useSplat(SPLAT_URL)
+function PumpRoomSplat({ src }: { src: string }) {
+  const { asset, loading, error } = useSplat(src)
   
-  useEffect(() => {
-    if (loading) console.log('🔄 Splat loading...')
-    if (error) console.error('❌ Splat error:', error)
-    if (asset) console.log('✅ Splat loaded:', asset)
-  }, [loading, error, asset])
-  
-  if (error || loading || !asset) {
+  if (error) {
+    console.error('Splat load error:', error)
     return null
   }
 
-  // Hardcoded position like the original
+  if (loading) {
+    console.log('Splat loading...')
+    return null
+  }
+  
+  if (!asset) {
+    return null
+  }
+
+  console.log('Splat rendering with asset:', asset)
+  
+  // Rotation to fix upside-down model if needed
+  // Try [180, 0, 0] if model is upside down
   return (
     <Entity position={[0, 0, 0]} rotation={[0, 0, 0]}>
       <GSplat asset={asset} />
@@ -37,69 +50,107 @@ function PumpRoomSplat() {
 }
 
 // ============================================
-// Camera Data Helper
+// Camera Capture Helper - exposes capture function to window
 // ============================================
-interface CameraData {
-  position: [number, number, number]
-  rotation: [number, number, number]
-}
-
-function CameraHelper({ onUpdate }: { onUpdate: (data: CameraData) => void }) {
+function CameraCaptureHelper() {
   const app = useApp()
-  const frameRef = useRef<number>()
   
   useEffect(() => {
     if (!app) return
-    console.log('✅ App ready')
     
-    const update = () => {
-      const cam = app.root.findByName('camera') as PCEntity | null
-      if (cam) {
-        const p = cam.getPosition()
-        const r = cam.getEulerAngles()
-        onUpdate({
-          position: [p.x, p.y, p.z],
-          rotation: [r.x, r.y, r.z]
-        })
+    const captureCamera = () => {
+      const cameraEntity = app.root.findByName('camera')
+      if (!cameraEntity) {
+        console.log('Camera entity not found')
+        return null
       }
-      frameRef.current = requestAnimationFrame(update)
+      
+      const pos = cameraEntity.getPosition()
+      const rot = cameraEntity.getEulerAngles()
+      
+      const data = {
+        pos: [pos.x, pos.y, pos.z],
+        rot: [rot.x, rot.y, rot.z]
+      }
+      
+      console.log('Camera captured:', data)
+      window.dispatchEvent(new CustomEvent('camera-captured', { detail: data }))
+      
+      return data
     }
-    frameRef.current = requestAnimationFrame(update)
+    
+    ;(window as any).captureCamera = captureCamera
     
     return () => {
-      if (frameRef.current) cancelAnimationFrame(frameRef.current)
+      delete (window as any).captureCamera
     }
-  }, [app, onUpdate])
+  }, [app])
   
   return null
 }
 
 // ============================================
-// Main Component
+// Camera Info Panel UI
 // ============================================
-export default function SplatTest() {
-  const [cam, setCam] = useState<CameraData>({ position: [0, 2, 5], rotation: [0, 0, 0] })
+function CameraInfoPanel() {
+  const [cameraData, setCameraData] = useState({ pos: [0, 2, 5], rot: [0, 0, 0] })
   
-  const handleUpdate = useCallback((data: CameraData) => setCam(data), [])
+  useEffect(() => {
+    const handler = (e: CustomEvent) => {
+      setCameraData(e.detail)
+    }
+    window.addEventListener('camera-captured', handler as EventListener)
+    return () => window.removeEventListener('camera-captured', handler as EventListener)
+  }, [])
+  
+  const handleCapture = () => {
+    if ((window as any).captureCamera) {
+      (window as any).captureCamera()
+    }
+  }
 
   return (
-    <div className="w-screen h-screen relative">
-      {/* Debug Panel */}
-      <div className="absolute top-4 left-4 bg-black/80 text-white p-4 rounded-lg font-mono text-xs z-50">
-        <div className="text-gray-400 mb-2">Camera (Live)</div>
-        <div>Pos: [{cam.position.map(v => v.toFixed(2)).join(', ')}]</div>
-        <div>Rot: [{cam.rotation.map(v => v.toFixed(1)).join(', ')}]</div>
-      </div>
+    <div className="absolute top-4 left-4 bg-black/70 text-white p-4 rounded-lg font-mono text-sm z-20">
+      <div className="text-gray-400 mb-2">Camera</div>
+      <button 
+        onClick={handleCapture}
+        className="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded mb-3 w-full"
+      >
+        Capture Position
+      </button>
+      <div>Pos: [{cameraData.pos.map(v => v.toFixed(2)).join(', ')}]</div>
+      <div>Rot: [{cameraData.rot.map(v => v.toFixed(1)).join(', ')}]</div>
+      <div className="text-gray-500 text-xs mt-2">Console: captureCamera()</div>
+    </div>
+  )
+}
 
-      {/* Controls Help */}
-      <div className="absolute bottom-4 left-4 bg-black/80 text-white p-3 rounded-lg text-xs z-50">
+// ============================================
+// Main Test Component
+// ============================================
+export default function SplatTest() {
+  return (
+    <div className="w-screen h-screen bg-black relative">
+      {/* Camera debug panel */}
+      <CameraInfoPanel />
+
+      {/* Instructions */}
+      <div className="absolute bottom-4 right-4 bg-black/70 text-white p-4 rounded-lg text-sm z-20">
+        <div className="text-gray-400 mb-1">Controls:</div>
         <div>Left drag: Orbit</div>
+        <div>Middle drag: Pan</div>
         <div>Scroll: Zoom</div>
       </div>
 
-      {/* PlayCanvas - exactly like the original that worked */}
-      <Application graphicsDeviceOptions={{ antialias: false }}>
-        <Entity name="camera" position={[0, 2, 5]}>
+      {/* PlayCanvas Application */}
+      <Application
+        graphicsDeviceOptions={{ antialias: false }}
+      >
+        {/* Camera with CameraControls script */}
+        <Entity 
+          name="camera" 
+          position={[0, 2, 5]}
+        >
           <Camera 
             clearColor="#1a1a2e"
             fov={60}
@@ -109,8 +160,11 @@ export default function SplatTest() {
           <Script script={CameraControls} />
         </Entity>
 
-        <PumpRoomSplat />
-        <CameraHelper onUpdate={handleUpdate} />
+        {/* The splat model */}
+        <PumpRoomSplat src={SPLAT_URL} />
+        
+        {/* Helper to expose camera capture */}
+        <CameraCaptureHelper />
       </Application>
     </div>
   )
