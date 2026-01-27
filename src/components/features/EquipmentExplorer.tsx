@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { BackButton } from '../shared/BackButton'
 
 // Import PlayCanvas blocks - registers web components
@@ -10,11 +10,21 @@ interface EquipmentExplorerProps {
 
 export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
   const [plyPath, setPlyPath] = useState('/splats/export_10000.ply')
-  const [loadKey, setLoadKey] = useState(0)
+  const [currentSrc, setCurrentSrc] = useState('/splats/export_10000.ply')
+  const viewerRef = useRef<HTMLElement>(null)
 
   const loadSplat = () => {
-    setLoadKey(k => k + 1)
+    console.log('Loading splat:', plyPath)
+    setCurrentSrc(plyPath)
   }
+
+  // Update the web component's src attribute when currentSrc changes
+  useEffect(() => {
+    if (viewerRef.current) {
+      console.log('Setting viewer src to:', currentSrc)
+      viewerRef.current.setAttribute('src', currentSrc)
+    }
+  }, [currentSrc])
 
   return (
     <div className="w-full h-full flex flex-col bg-[#1f1c1a]">
@@ -26,10 +36,11 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Viewer - PlayCanvas web component */}
-        <div className="flex-1 relative">
+        <div className="flex-1 relative bg-black">
           <pc-splat-viewer
-            key={loadKey}
-            src={plyPath}
+            ref={viewerRef}
+            src={currentSrc}
+            camera-controls
             style={{ width: '100%', height: '100%', display: 'block' }}
           />
         </div>
@@ -51,6 +62,7 @@ export function EquipmentExplorer({ onBack }: EquipmentExplorerProps) {
             >
               Load
             </button>
+            <p className="text-[#d4c5b0]/40 text-xs mt-2">Current: {currentSrc}</p>
           </section>
 
           {/* Controls hint */}
@@ -70,7 +82,11 @@ declare global {
   namespace JSX {
     interface IntrinsicElements {
       'pc-splat-viewer': React.DetailedHTMLProps<
-        React.HTMLAttributes<HTMLElement> & { src?: string },
+        React.HTMLAttributes<HTMLElement> & { 
+          src?: string
+          'camera-controls'?: boolean
+          ref?: React.Ref<HTMLElement>
+        },
         HTMLElement
       >
     }
