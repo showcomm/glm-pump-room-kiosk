@@ -7,11 +7,11 @@
  * 3. Run `npm run dev`
  */
 
-import { useRef, useState } from 'react'
+import { useRef, useState, useCallback } from 'react'
 import { Application, Entity } from '@playcanvas/react'
-import { Camera, GSplat, Script } from '@playcanvas/react/components'
-import { useSplat } from '@playcanvas/react/hooks'
-import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs'
+import { Camera, GSplat } from '@playcanvas/react/components'
+import { OrbitControls } from '@playcanvas/react/scripts'
+import { useSplat, useApp } from '@playcanvas/react/hooks'
 
 // ============================================
 // CONFIGURATION - Update this path to your .ply file
@@ -19,7 +19,7 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs'
 const SPLAT_URL = '/pump-room.ply'
 
 // ============================================
-// Splat Component - kept simple, no callbacks
+// Splat Component
 // ============================================
 function PumpRoomSplat({ src }: { src: string }) {
   const { asset, loading, error } = useSplat(src)
@@ -48,47 +48,80 @@ function PumpRoomSplat({ src }: { src: string }) {
 }
 
 // ============================================
-// Camera Info Panel (for development)
+// Camera Info Component - lives inside Application to access entities
 // ============================================
-function CameraInfoPanel({ cameraRef }: { cameraRef: React.RefObject<any> }) {
-  const [info, setInfo] = useState({ pos: ['0', '0', '0'], rot: ['0', '0', '0'] })
-
-  const updateInfo = () => {
-    if (cameraRef.current) {
-      const pos = cameraRef.current.getPosition()
-      const rot = cameraRef.current.getEulerAngles()
-      setInfo({
-        pos: [pos.x.toFixed(2), pos.y.toFixed(2), pos.z.toFixed(2)],
-        rot: [rot.x.toFixed(1), rot.y.toFixed(1), rot.z.toFixed(1)]
-      })
+function CameraInfo({ onCameraData }: { onCameraData: (data: { pos: number[], rot: number[] }) => void }) {
+  const app = useApp()
+  
+  const captureCamera = useCallback(() => {
+    if (!app) {
+      console.log('No app')
+      return
     }
+    
+    // Find camera entity by name
+    const cameraEntity = app.root.findByName('camera')
+    if (!cameraEntity) {
+      console.log('Camera entity not found')
+      return
+    }
+    
+    const pos = cameraEntity.getPosition()
+    const rot = cameraEntity.getEulerAngles()
+    
+    console.log('Camera position:', pos.x, pos.y, pos.z)
+    console.log('Camera rotation:', rot.x, rot.y, rot.z)
+    
+    onCameraData({
+      pos: [pos.x, pos.y, pos.z],
+      rot: [rot.x, rot.y, rot.z]
+    })
+  }, [app, onCameraData])
+  
+  // Expose capture function via window for debugging
+  if (typeof window !== 'undefined') {
+    (window as any).captureCamera = captureCamera
   }
+  
+  return null
+}
 
+// ============================================
+// Camera Info Panel UI (outside Application)
+// ============================================
+function CameraInfoPanel({ cameraData, onCapture }: { 
+  cameraData: { pos: number[], rot: number[] }
+  onCapture: () => void 
+}) {
   return (
     <div className="absolute top-4 left-4 bg-black/70 text-white p-4 rounded-lg font-mono text-sm z-20">
-      <div className="text-gray-400 mb-2">Camera (click to refresh)</div>
+      <div className="text-gray-400 mb-2">Camera</div>
       <button 
-        onClick={updateInfo}
+        onClick={onCapture}
         className="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded mb-3 w-full"
       >
-        Get Position
+        Capture Position
       </button>
-      <div>Pos: [{info.pos.join(', ')}]</div>
-      <div>Rot: [{info.rot.join(', ')}]</div>
+      <div>Pos: [{cameraData.pos.map(v => v.toFixed(2)).join(', ')}]</div>
+      <div>Rot: [{cameraData.rot.map(v => v.toFixed(1)).join(', ')}]</div>
     </div>
   )
 }
 
 // ============================================
-// Main Test Component - NO state changes that could cause re-render
+// Main Test Component
 // ============================================
 export default function SplatTest() {
-  const cameraRef = useRef(null)
+  const [cameraData, setCameraData] = useState({ pos: [0, 2, 5], rot: [0, 0, 0] })
+  const captureRef = useRef<(() => void) | null>(null)
 
   return (
     <div className="w-screen h-screen bg-black relative">
       {/* Camera debug panel */}
-      <CameraInfoPanel cameraRef={cameraRef} />
+      <CameraInfoPanel 
+        cameraData={cameraData} 
+        onCapture={() => captureRef.current?.()}
+      />
 
       {/* Instructions */}
       <div className="absolute bottom-4 right-4 bg-black/70 text-white p-4 rounded-lg text-sm z-20">
@@ -104,7 +137,6 @@ export default function SplatTest() {
       >
         {/* Camera with orbit controls */}
         <Entity 
-          ref={cameraRef}
           name="camera" 
           position={[0, 2, 5]}
         >
@@ -112,11 +144,21 @@ export default function SplatTest() {
             clearColor="#1a1a2e"
             fov={60}
           />
-          <Script script={CameraControls} />
+          <OrbitControls />
         </Entity>
 
         {/* The splat model */}
         <PumpRoomSplat src={SPLAT_URL} />
+        
+        {/* Camera info helper - inside Application to access useApp */}
+        <CameraInfo 
+          onCameraData={(data) => {
+            setCameraData(data)
+            captureRef.current = () => {
+              // This will be called from the panel
+            }
+          }}
+        />
       </Application>
     </div>
   )
