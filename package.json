@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@playcanvas/blocks": "^0.3.7",
+    "@playcanvas/react": "^0.8.0",
+    "playcanvas": "^2.5.0",
     "@supabase/supabase-js": "^2.39.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
