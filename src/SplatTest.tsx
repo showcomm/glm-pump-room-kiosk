@@ -18,7 +18,7 @@ import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat, Script } from '@playcanvas/react/components'
 import { useSplat, useApp } from '@playcanvas/react/hooks'
 import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs'
-import type { Entity as PCEntity, Application as PCApplication } from 'playcanvas'
+import type { Entity as PCEntity } from 'playcanvas'
 
 // ============================================
 // CONFIGURATION
@@ -68,12 +68,13 @@ function CameraCaptureHelper({ onCameraUpdate }: CameraCaptureHelperProps) {
   useEffect(() => {
     if (!app) return
     
+    console.log('✅ PlayCanvas app ready')
+    
     const getCameraData = (): CameraData | null => {
       const cameraEntity = app.root.findByName('camera') as PCEntity | null
       if (!cameraEntity) return null
       
       // Get the actual world position of the camera entity
-      // The CameraControls script updates the entity's transform directly
       const worldPos = cameraEntity.getPosition()
       const worldRot = cameraEntity.getEulerAngles()
       
@@ -82,13 +83,10 @@ function CameraCaptureHelper({ onCameraUpdate }: CameraCaptureHelperProps) {
       const fov = cameraComponent?.fov ?? DEFAULT_CAMERA.fov
       
       // Try to get the script instance to read focusPoint
-      // The CameraControls script has a focusPoint property
       const scripts = cameraEntity.script
       let focusPoint: [number, number, number] = [0, 0, 0]
       
       if (scripts) {
-        // Access the cameraControls script instance
-        // It may be available as scripts.cameraControls or we need to iterate
         const scriptInstances = (scripts as any)._scripts
         if (scriptInstances && scriptInstances.length > 0) {
           const controlScript = scriptInstances[0]
@@ -162,16 +160,17 @@ interface PumpRoomSplatProps {
 function PumpRoomSplat({ src, position, rotation }: PumpRoomSplatProps) {
   const { asset, loading, error } = useSplat(src)
   
+  useEffect(() => {
+    if (loading) console.log('🔄 Splat loading...')
+    if (error) console.error('❌ Splat error:', error)
+    if (asset) console.log('✅ Splat loaded:', asset)
+  }, [loading, error, asset])
+  
   if (error) {
-    console.error('Splat load error:', error)
     return null
   }
 
-  if (loading) {
-    return null
-  }
-  
-  if (!asset) {
+  if (loading || !asset) {
     return null
   }
 
@@ -379,10 +378,10 @@ function ControlsHelp() {
 }
 
 // Loading indicator
-function LoadingOverlay() {
+function LoadingOverlay({ message }: { message: string }) {
   return (
-    <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-30">
-      <div className="text-white text-lg">Loading splat...</div>
+    <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-30 pointer-events-none">
+      <div className="text-white text-lg">{message}</div>
     </div>
   )
 }
@@ -408,62 +407,70 @@ export default function SplatTest() {
   }, [isLoading])
 
   return (
-    <div className="w-screen h-screen bg-gray-900 flex items-center justify-center">
+    <div className="w-screen h-screen bg-gray-900 flex items-center justify-center overflow-hidden">
       {/* 16:9 Aspect Ratio Container */}
       <div 
-        className="relative bg-black"
+        className="relative bg-black overflow-hidden"
         style={{
-          width: 'min(100vw, calc(100vh * 16 / 9))',
-          height: 'min(100vh, calc(100vw * 9 / 16))',
+          width: 'min(100vw, 177.78vh)',   // 16/9 = 1.7778
+          height: 'min(100vh, 56.25vw)',   // 9/16 = 0.5625
         }}
       >
-        {/* UI Overlays */}
-        <CameraInfoPanel cameraData={cameraData} />
-        <ObjectControls settings={objectSettings} onChange={setObjectSettings} />
-        <ControlsHelp />
+        {/* UI Overlays - positioned above the canvas */}
+        <div className="absolute inset-0 z-10 pointer-events-none">
+          <div className="pointer-events-auto">
+            <CameraInfoPanel cameraData={cameraData} />
+          </div>
+          <div className="pointer-events-auto">
+            <ObjectControls settings={objectSettings} onChange={setObjectSettings} />
+          </div>
+          <div className="pointer-events-auto">
+            <ControlsHelp />
+          </div>
+        </div>
         
-        {isLoading && <LoadingOverlay />}
+        {isLoading && <LoadingOverlay message="Loading..." />}
 
-        {/* PlayCanvas Application */}
-        <Application
-          graphicsDeviceOptions={{ antialias: true }}
-        >
-          {/* Camera with CameraControls script */}
-          <Entity 
-            name="camera" 
-            position={DEFAULT_CAMERA.position}
+        {/* PlayCanvas Application - fills the container */}
+        <div className="absolute inset-0">
+          <Application
+            graphicsDeviceOptions={{ antialias: true }}
           >
-            <Camera 
-              clearColor="#1a1a2e"
-              fov={DEFAULT_CAMERA.fov}
-              farClip={DEFAULT_CAMERA.farClip}
-              nearClip={DEFAULT_CAMERA.nearClip}
-            />
-            <Script 
-              script={CameraControls}
-              // CameraControls script attributes
-              // These configure pan, zoom, and orbit behavior
-              sceneSize={10}
-              focusDamping={0.1}
-              moveDamping={0.9}
-              rotateDamping={0.9}
-              zoomDamping={0.9}
-              zoomMin={0.5}
-              zoomMax={50}
-              pitchRange={[-90, 90]}
-            />
-          </Entity>
+            {/* Camera with CameraControls script */}
+            <Entity 
+              name="camera" 
+              position={DEFAULT_CAMERA.position}
+            >
+              <Camera 
+                clearColor="#1a1a2e"
+                fov={DEFAULT_CAMERA.fov}
+                farClip={DEFAULT_CAMERA.farClip}
+                nearClip={DEFAULT_CAMERA.nearClip}
+              />
+              <Script 
+                script={CameraControls}
+                sceneSize={10}
+                focusDamping={0.1}
+                moveDamping={0.9}
+                rotateDamping={0.9}
+                zoomDamping={0.9}
+                zoomMin={0.5}
+                zoomMax={50}
+                pitchRange={[-90, 90]}
+              />
+            </Entity>
 
-          {/* The splat model */}
-          <PumpRoomSplat 
-            src={SPLAT_URL} 
-            position={objectSettings.position}
-            rotation={objectSettings.rotation}
-          />
-          
-          {/* Helper to read camera data */}
-          <CameraCaptureHelper onCameraUpdate={handleCameraUpdate} />
-        </Application>
+            {/* The splat model */}
+            <PumpRoomSplat 
+              src={SPLAT_URL} 
+              position={objectSettings.position}
+              rotation={objectSettings.rotation}
+            />
+            
+            {/* Helper to read camera data */}
+            <CameraCaptureHelper onCameraUpdate={handleCameraUpdate} />
+          </Application>
+        </div>
       </div>
     </div>
   )
