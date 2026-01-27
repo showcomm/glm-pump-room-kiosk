@@ -1,6 +1,10 @@
+@import "@playcanvas/blocks";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* PlayCanvas blocks needs to be processed by Tailwind */
+@source "../node_modules/@playcanvas/blocks";
 
 /* Lock body to kiosk dimensions */
 html, body, #root {
@@ -39,4 +43,11 @@ body {
   50% {
     opacity: 0.5;
   }
+}
+
+/* PlayCanvas splat viewer sizing fix */
+.splat-viewer,
+[class*="splat-viewer"] {
+  width: 100% !important;
+  height: 100% !important;
 }
