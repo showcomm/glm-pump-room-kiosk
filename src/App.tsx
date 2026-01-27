@@ -7,9 +7,8 @@ import { SystemAnimation } from './components/features/SystemAnimation'
 import { BuildingCutaway } from './components/features/BuildingCutaway'
 import { QuizMode } from './components/features/QuizMode'
 import { PhotoGallery } from './components/features/PhotoGallery'
-import { SplatComparisonTest } from './components/features/SplatComparisonTest'
 
-export type Feature = 'home' | 'explore' | 'animation' | 'cutaway' | 'quiz' | 'gallery' | 'splat-test'
+export type Feature = 'home' | 'explore' | 'animation' | 'cutaway' | 'quiz' | 'gallery'
 
 function App() {
   const [activeFeature, setActiveFeature] = useState<Feature>('home')
@@ -28,8 +27,6 @@ function App() {
         return <QuizMode onBack={() => setActiveFeature('home')} />
       case 'gallery':
         return <PhotoGallery onBack={() => setActiveFeature('home')} />
-      case 'splat-test':
-        return <SplatComparisonTest onBack={() => setActiveFeature('home')} />
       default:
         return <HomeScreen onSelectFeature={setActiveFeature} />
     }
