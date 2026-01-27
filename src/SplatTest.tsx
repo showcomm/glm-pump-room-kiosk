@@ -7,7 +7,7 @@
  * 3. Run `npm run dev`
  */
 
-import { useRef, useState, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat } from '@playcanvas/react/components'
 import { OrbitControls } from '@playcanvas/react/scripts'
@@ -48,62 +48,81 @@ function PumpRoomSplat({ src }: { src: string }) {
 }
 
 // ============================================
-// Camera Info Component - lives inside Application to access entities
+// Camera Capture Helper - exposes capture function to window
 // ============================================
-function CameraInfo({ onCameraData }: { onCameraData: (data: { pos: number[], rot: number[] }) => void }) {
+function CameraCaptureHelper() {
   const app = useApp()
   
-  const captureCamera = useCallback(() => {
-    if (!app) {
-      console.log('No app')
-      return
+  useEffect(() => {
+    if (!app) return
+    
+    const captureCamera = () => {
+      const cameraEntity = app.root.findByName('camera')
+      if (!cameraEntity) {
+        console.log('Camera entity not found')
+        return null
+      }
+      
+      const pos = cameraEntity.getPosition()
+      const rot = cameraEntity.getEulerAngles()
+      
+      const data = {
+        pos: [pos.x, pos.y, pos.z],
+        rot: [rot.x, rot.y, rot.z]
+      }
+      
+      console.log('Camera captured:', data)
+      
+      // Dispatch custom event with camera data
+      window.dispatchEvent(new CustomEvent('camera-captured', { detail: data }))
+      
+      return data
     }
     
-    // Find camera entity by name
-    const cameraEntity = app.root.findByName('camera')
-    if (!cameraEntity) {
-      console.log('Camera entity not found')
-      return
+    // Expose to window for console debugging
+    ;(window as any).captureCamera = captureCamera
+    
+    return () => {
+      delete (window as any).captureCamera
     }
-    
-    const pos = cameraEntity.getPosition()
-    const rot = cameraEntity.getEulerAngles()
-    
-    console.log('Camera position:', pos.x, pos.y, pos.z)
-    console.log('Camera rotation:', rot.x, rot.y, rot.z)
-    
-    onCameraData({
-      pos: [pos.x, pos.y, pos.z],
-      rot: [rot.x, rot.y, rot.z]
-    })
-  }, [app, onCameraData])
-  
-  // Expose capture function via window for debugging
-  if (typeof window !== 'undefined') {
-    (window as any).captureCamera = captureCamera
-  }
+  }, [app])
   
   return null
 }
 
 // ============================================
-// Camera Info Panel UI (outside Application)
+// Camera Info Panel UI
 // ============================================
-function CameraInfoPanel({ cameraData, onCapture }: { 
-  cameraData: { pos: number[], rot: number[] }
-  onCapture: () => void 
-}) {
+function CameraInfoPanel() {
+  const [cameraData, setCameraData] = useState({ pos: [0, 2, 5], rot: [0, 0, 0] })
+  
+  useEffect(() => {
+    const handler = (e: CustomEvent) => {
+      setCameraData(e.detail)
+    }
+    window.addEventListener('camera-captured', handler as EventListener)
+    return () => window.removeEventListener('camera-captured', handler as EventListener)
+  }, [])
+  
+  const handleCapture = () => {
+    // Call the exposed window function
+    if ((window as any).captureCamera) {
+      (window as any).captureCamera()
+    }
+  }
+
   return (
     <div className="absolute top-4 left-4 bg-black/70 text-white p-4 rounded-lg font-mono text-sm z-20">
       <div className="text-gray-400 mb-2">Camera</div>
       <button 
-        onClick={onCapture}
+        onClick={handleCapture}
         className="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded mb-3 w-full"
       >
         Capture Position
       </button>
       <div>Pos: [{cameraData.pos.map(v => v.toFixed(2)).join(', ')}]</div>
       <div>Rot: [{cameraData.rot.map(v => v.toFixed(1)).join(', ')}]</div>
+      <div className="text-gray-500 text-xs mt-2">Also: window.captureCamera()</div>
     </div>
   )
 }
@@ -112,16 +131,10 @@ function CameraInfoPanel({ cameraData, onCapture }: {
 // Main Test Component
 // ============================================
 export default function SplatTest() {
-  const [cameraData, setCameraData] = useState({ pos: [0, 2, 5], rot: [0, 0, 0] })
-  const captureRef = useRef<(() => void) | null>(null)
-
   return (
     <div className="w-screen h-screen bg-black relative">
-      {/* Camera debug panel */}
-      <CameraInfoPanel 
-        cameraData={cameraData} 
-        onCapture={() => captureRef.current?.()}
-      />
+      {/* Camera debug panel - outside Application */}
+      <CameraInfoPanel />
 
       {/* Instructions */}
       <div className="absolute bottom-4 right-4 bg-black/70 text-white p-4 rounded-lg text-sm z-20">
@@ -150,15 +163,8 @@ export default function SplatTest() {
         {/* The splat model */}
         <PumpRoomSplat src={SPLAT_URL} />
         
-        {/* Camera info helper - inside Application to access useApp */}
-        <CameraInfo 
-          onCameraData={(data) => {
-            setCameraData(data)
-            captureRef.current = () => {
-              // This will be called from the panel
-            }
-          }}
-        />
+        {/* Helper to expose camera capture */}
+        <CameraCaptureHelper />
       </Application>
     </div>
   )
