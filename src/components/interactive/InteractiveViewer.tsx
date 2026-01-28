@@ -288,7 +288,7 @@ interface ConstrainedHotspotOverlayProps {
 function ConstrainedHotspotOverlay({ bounds, frameWidth }: ConstrainedHotspotOverlayProps) {
   const { 
     navigateToEquipment, 
-    selectedEquipmentId,
+    selectedHotspotSlug,
     isTransitioning,
     language 
   } = useKioskStore()
@@ -296,9 +296,10 @@ function ConstrainedHotspotOverlay({ bounds, frameWidth }: ConstrainedHotspotOve
   const { hotspots } = useSplatData()
   
   // Don't show hotspots during transitions or when equipment is selected
-  const showHotspots = !isTransitioning && !selectedEquipmentId
+  const showHotspots = !isTransitioning && !selectedHotspotSlug
   
   const handleHotspotClick = (hotspotSlug: string) => {
+    console.log('[ConstrainedHotspotOverlay] Hotspot clicked:', hotspotSlug)
     if (!isTransitioning) {
       navigateToEquipment(hotspotSlug)
     }
@@ -488,9 +489,18 @@ export function InteractiveViewer() {
   
   const isIdle = useKioskStore(state => state.isIdle)
   const recordInteraction = useKioskStore(state => state.recordInteraction)
+  const setHotspots = useKioskStore(state => state.setHotspots)
   
-  // Load config from database
-  const { config, loading } = useSplatData()
+  // Load config and hotspots from database
+  const { config, hotspots, loading } = useSplatData()
+  
+  // Populate store with hotspots when they load
+  useEffect(() => {
+    if (hotspots) {
+      console.log('[InteractiveViewer] Loaded hotspots from database:', hotspots)
+      setHotspots(hotspots)
+    }
+  }, [hotspots, setHotspots])
   
   // Get target dimensions from config (with fallbacks)
   const targetWidth = config?.target_width || DEFAULT_TARGET_WIDTH
