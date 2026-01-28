@@ -27,6 +27,8 @@ export interface Database {
           overview_position: number[]
           overview_rotation: number[]
           overview_fov: number
+          target_width: number
+          target_height: number
           frame_width: number | null
           background_color: string | null
           idle_timeout_seconds: number | null
@@ -44,6 +46,8 @@ export interface Database {
           overview_position?: number[]
           overview_rotation?: number[]
           overview_fov?: number
+          target_width?: number
+          target_height?: number
           frame_width?: number | null
           background_color?: string | null
           idle_timeout_seconds?: number | null
@@ -61,6 +65,8 @@ export interface Database {
           overview_position?: number[]
           overview_rotation?: number[]
           overview_fov?: number
+          target_width?: number
+          target_height?: number
           frame_width?: number | null
           background_color?: string | null
           idle_timeout_seconds?: number | null
@@ -206,3 +212,15 @@ export interface ParsedSplatHotspot extends Omit<SplatHotspot, 'bounds' | 'visua
   bounds: HotspotBounds
   visual_config: HotspotVisualConfig | null
 }
+
+// Common display resolution presets
+export const RESOLUTION_PRESETS = [
+  { label: '1920×1080 (16:9 Landscape)', width: 1920, height: 1080 },
+  { label: '1080×1920 (9:16 Portrait)', width: 1080, height: 1920 },
+  { label: '2560×1440 (16:9 QHD)', width: 2560, height: 1440 },
+  { label: '1440×2560 (9:16 QHD Portrait)', width: 1440, height: 2560 },
+  { label: '3840×2160 (16:9 4K)', width: 3840, height: 2160 },
+  { label: '2160×3840 (9:16 4K Portrait)', width: 2160, height: 3840 },
+  { label: '1280×720 (16:9 HD)', width: 1280, height: 720 },
+  { label: '720×1280 (9:16 HD Portrait)', width: 720, height: 1280 },
+] as const
