@@ -46,11 +46,12 @@ function PumpRoomSplat({ src }: { src: string }) {
 
 // ============================================
 // Camera Helper - broadcasts position via window events
-// No React state inside Application
+// Also adds WASD keyboard controls for panning
 // ============================================
 function CameraHelper() {
   const app = useApp()
   const frameRef = useRef<number>()
+  const keysPressed = useRef<Set<string>>(new Set())
   
   useEffect(() => {
     if (!app) return
@@ -70,7 +71,41 @@ function CameraHelper() {
     
     ;(window as any).captureCamera = getCameraData
     
+    // Keyboard controls for panning
+    const handleKeyDown = (e: KeyboardEvent) => {
+      keysPressed.current.add(e.key.toLowerCase())
+    }
+    
+    const handleKeyUp = (e: KeyboardEvent) => {
+      keysPressed.current.delete(e.key.toLowerCase())
+    }
+    
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    
+    const PAN_SPEED = 0.05
+    
     const updateLoop = () => {
+      const cameraEntity = app.root.findByName('camera')
+      
+      // Handle WASD panning
+      if (cameraEntity && keysPressed.current.size > 0) {
+        const pos = cameraEntity.getPosition()
+        let dx = 0, dy = 0, dz = 0
+        
+        if (keysPressed.current.has('w')) dz -= PAN_SPEED
+        if (keysPressed.current.has('s')) dz += PAN_SPEED
+        if (keysPressed.current.has('a')) dx -= PAN_SPEED
+        if (keysPressed.current.has('d')) dx += PAN_SPEED
+        if (keysPressed.current.has('q')) dy -= PAN_SPEED
+        if (keysPressed.current.has('e')) dy += PAN_SPEED
+        
+        if (dx !== 0 || dy !== 0 || dz !== 0) {
+          cameraEntity.setPosition(pos.x + dx, pos.y + dy, pos.z + dz)
+        }
+      }
+      
+      // Broadcast position
       const data = getCameraData()
       if (data) {
         window.dispatchEvent(new CustomEvent('camera-update', { detail: data }))
@@ -81,6 +116,8 @@ function CameraHelper() {
     
     return () => {
       delete (window as any).captureCamera
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
       if (frameRef.current) cancelAnimationFrame(frameRef.current)
     }
   }, [app])
@@ -113,7 +150,7 @@ function Sidebar() {
       return
     }
     
-    const position = {
+    const captured = {
       equipment_id: selectedEquipment,
       position: cameraData.pos.map(v => Number(v.toFixed(3))),
       rotation: cameraData.rot.map(v => Number(v.toFixed(2))),
@@ -122,15 +159,15 @@ function Sidebar() {
     
     setCapturedPositions(prev => ({
       ...prev,
-      [selectedEquipment]: position
+      [selectedEquipment]: captured
     }))
     
     const equipmentItem = equipment.find(e => e.id === selectedEquipment)
     const code = `{
   id: '${selectedEquipment}-view',
   equipment_id: '${selectedEquipment}',
-  position: [${position.position.join(', ')}],
-  rotation: [${position.rotation.join(', ')}],
+  position: [${captured.position.join(', ')}],
+  rotation: [${captured.rotation.join(', ')}],
   fov: 60,
   label: { en: '${equipmentItem?.name.en || ''}', fr: '${equipmentItem?.name.fr || ''}' }
 },`
@@ -226,7 +263,7 @@ function Sidebar() {
         </div>
         
         <div className="space-y-2">
-          {Object.entries(capturedPositions).map(([id, pos]) => (
+          {Object.entries(capturedPositions).map(([id, data]) => (
             <div 
               key={id}
               className="bg-green-900/30 border border-green-700/50 rounded p-2 text-xs"
@@ -235,7 +272,10 @@ function Sidebar() {
                 {equipment.find(e => e.id === id)?.name.en}
               </div>
               <div className="text-gray-400 font-mono">
-                [{pos.position.join(', ')}]
+                pos: [{data.position.map((v: number) => v.toFixed(2)).join(', ')}]
+              </div>
+              <div className="text-gray-400 font-mono">
+                rot: [{data.rotation.map((v: number) => v.toFixed(1)).join(', ')}]
               </div>
             </div>
           ))}
@@ -244,12 +284,19 @@ function Sidebar() {
       
       {/* Instructions */}
       <div className="text-xs text-gray-500 border-t border-gray-700 pt-4">
-        <p className="mb-2"><strong>How to use:</strong></p>
+        <p className="mb-2"><strong>Controls:</strong></p>
+        <ul className="space-y-1 mb-4">
+          <li>• Left-drag: Orbit</li>
+          <li>• Scroll: Zoom</li>
+          <li>• WASD: Pan horizontally</li>
+          <li>• Q/E: Pan up/down</li>
+        </ul>
+        <p className="mb-2"><strong>Workflow:</strong></p>
         <ol className="list-decimal list-inside space-y-1">
           <li>Select equipment from dropdown</li>
-          <li>Navigate camera to good viewpoint</li>
+          <li>Navigate camera to viewpoint</li>
           <li>Click "Capture Position"</li>
-          <li>Position is copied to clipboard</li>
+          <li>Code is copied to clipboard</li>
           <li>Paste into viewpoints.ts</li>
         </ol>
       </div>
@@ -283,7 +330,7 @@ function SplatViewer() {
       
       {/* Controls overlay */}
       <div className="absolute bottom-4 left-4 bg-black/70 text-white px-4 py-2 rounded text-sm">
-        Left-drag: orbit | Scroll: zoom | Middle-drag: pan
+        Orbit: left-drag | Zoom: scroll | Pan: WASD + Q/E
       </div>
     </div>
   )
