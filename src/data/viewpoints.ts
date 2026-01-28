@@ -78,13 +78,13 @@ export const viewpoints: CameraViewpoint[] = [
   {
     id: 'main-engine-west-view',
     equipment_id: 'main-engine-west',
-    // TEMP: Zoom in more
-    position: [-0.005, -3.5, 0.296],
-    rotation: [87.53, -0.96, 0],
-    fov: 38,
+    // CAPTURED: Real viewpoint from admin tool
+    position: [-0.450, -2.840, -2.840],
+    rotation: [149.30, -0.97, 0.00],
+    fov: 60,
     label: {
-      en: 'West Steam Engine',
-      fr: 'Moteur à vapeur Ouest'
+      en: 'Main Steam Engine (West)',
+      fr: 'Moteur à vapeur principal (Ouest)'
     }
   },
   {
