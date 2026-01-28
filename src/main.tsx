@@ -5,6 +5,7 @@ import './styles/index.css'
 // Pages
 import InteractiveViewer from './components/interactive/InteractiveViewer'
 import AdminLanding from './components/admin/AdminLanding'
+import DisplaySettings from './components/admin/DisplaySettings'
 import CameraCapture from './components/admin/CameraCapture'
 import HotspotEditor from './components/admin/HotspotEditor'
 
@@ -16,6 +17,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <Routes>
       <Route path="/" element={<InteractiveViewer />} />
       <Route path="/admin" element={<AdminLanding />} />
+      <Route path="/admin/display-settings" element={<DisplaySettings />} />
       <Route path="/admin/camera-capture" element={<CameraCapture />} />
       <Route path="/admin/hotspot-editor" element={<HotspotEditor />} />
     </Routes>
