@@ -3,15 +3,25 @@
  * 
  * Displays equipment name, description, function, and specifications
  * with bilingual support.
+ * 
+ * Accepts optional viewportBounds for constrained viewport positioning.
  */
 
 import { useKioskStore } from '../../store/kioskStore'
 
-interface InfoPanelProps {
-  frameWidth: number
+interface ViewportBounds {
+  left: number
+  top: number
+  width: number
+  height: number
 }
 
-export function InfoPanel({ frameWidth }: InfoPanelProps) {
+interface InfoPanelProps {
+  frameWidth: number
+  viewportBounds?: ViewportBounds
+}
+
+export function InfoPanel({ frameWidth, viewportBounds }: InfoPanelProps) {
   const { 
     selectedEquipment, 
     language,
@@ -31,6 +41,19 @@ export function InfoPanel({ frameWidth }: InfoPanelProps) {
     }
   }
   
+  // Calculate position based on viewport bounds if provided
+  const top = viewportBounds 
+    ? viewportBounds.top + frameWidth + 20 
+    : frameWidth + 20
+  
+  const right = viewportBounds 
+    ? (window.innerWidth - viewportBounds.left - viewportBounds.width) + frameWidth + 20
+    : frameWidth + 20
+  
+  const bottom = viewportBounds 
+    ? (window.innerHeight - viewportBounds.top - viewportBounds.height) + frameWidth + 80
+    : frameWidth + 80
+  
   return (
     <div 
       className={`
@@ -38,9 +61,9 @@ export function InfoPanel({ frameWidth }: InfoPanelProps) {
         ${isVisible ? 'translate-x-0' : 'translate-x-full'}
       `}
       style={{
-        top: frameWidth + 20,
-        right: frameWidth + 20,
-        bottom: frameWidth + 80,
+        top,
+        right,
+        bottom,
         width: 'min(400px, 35vw)',
       }}
     >

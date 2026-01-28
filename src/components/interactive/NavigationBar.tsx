@@ -1,15 +1,25 @@
 /**
  * Navigation Bar - Bottom bar with home button, language toggle, and admin link
+ * 
+ * Accepts optional viewportBounds for constrained viewport positioning.
  */
 
 import { Link } from 'react-router-dom'
 import { useKioskStore } from '../../store/kioskStore'
 
-interface NavigationBarProps {
-  frameWidth: number
+interface ViewportBounds {
+  left: number
+  top: number
+  width: number
+  height: number
 }
 
-export function NavigationBar({ frameWidth }: NavigationBarProps) {
+interface NavigationBarProps {
+  frameWidth: number
+  viewportBounds?: ViewportBounds
+}
+
+export function NavigationBar({ frameWidth, viewportBounds }: NavigationBarProps) {
   const { 
     language, 
     toggleLanguage, 
@@ -18,13 +28,22 @@ export function NavigationBar({ frameWidth }: NavigationBarProps) {
     isTransitioning
   } = useKioskStore()
   
+  // Calculate position based on viewport bounds if provided
+  const left = viewportBounds ? viewportBounds.left : 0
+  const width = viewportBounds ? viewportBounds.width : undefined
+  const bottom = viewportBounds 
+    ? (window.innerHeight - viewportBounds.top - viewportBounds.height)
+    : 0
+  
   return (
     <div 
       className="absolute z-30 flex items-center justify-between px-6"
       style={{
-        left: frameWidth,
-        right: frameWidth,
-        bottom: frameWidth,
+        left: left + frameWidth,
+        right: viewportBounds 
+          ? (window.innerWidth - viewportBounds.left - viewportBounds.width) + frameWidth 
+          : frameWidth,
+        bottom: bottom + frameWidth,
         height: 60,
         background: 'linear-gradient(to top, rgba(26, 26, 26, 0.95), rgba(26, 26, 26, 0.8))'
       }}
