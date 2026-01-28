@@ -1,22 +1,22 @@
 /**
- * Hotspot Editor - Polygon Drawing Tool (CORRECTED)
+ * Hotspot Editor - Polygon Drawing Tool
  * 
- * ARCHITECTURE FIX:
- * - PlayCanvas Application is positioned INSIDE the viewport bounds (same as InteractiveViewer)
- * - SVG overlay is positioned inside the SAME container
- * - This ensures coordinates naturally align between splat view and drawn hotspots
+ * CRITICAL PLAYCANVAS RULE:
+ * PlayCanvas components BREAK if their parent re-renders.
+ * Solution: Isolate the Application in a component with ZERO changing props/state.
+ * The SplatViewer component below is completely static - it never re-renders.
+ * 
+ * ARCHITECTURE:
+ * - SplatViewer: Isolated, static, renders PlayCanvas once
+ * - EditorUI: All the React state and UI, rendered as sibling
+ * - Both positioned in the same viewport container via CSS
  * 
  * COORDINATE SYSTEM:
  * - Stored coordinates are 0-100 percentages in both X and Y
  * - viewBox="0 0 100 100" with preserveAspectRatio="none"
- * - Coordinates map directly: click at 50% -> stored as 50 -> rendered at 50
- * 
- * CIRCLE FIX:
- * - Use <ellipse> with compensated radii to appear circular in stretched SVG
- * - rx = baseRadius / aspectRatio, ry = baseRadius
  */
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, memo } from 'react'
 import { Link } from 'react-router-dom'
 import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat } from '@playcanvas/react/components'
@@ -27,7 +27,7 @@ import { createHotspot, deleteHotspot } from '../../lib/api/splat'
 import { getOverviewViewpoint } from '../../data/viewpoints'
 
 // ============================================
-// CONFIGURATION
+// CONFIGURATION - Module level constants
 // ============================================
 const SPLAT_URL = '/pump-room.ply'
 const INITIAL = getOverviewViewpoint()
@@ -54,68 +54,10 @@ interface Point {
 type EditorMode = 'select' | 'draw'
 
 // ============================================
-// Viewport Bounds Hook - calculates aspect-ratio-constrained bounds
-// Matches InteractiveViewer's approach exactly
+// Splat Component - static, no props that change
 // ============================================
-interface ViewportBounds {
-  left: number
-  top: number
-  width: number
-  height: number
-}
-
-function useViewportBounds(
-  containerRef: React.RefObject<HTMLDivElement>,
-  targetWidth: number,
-  targetHeight: number
-): ViewportBounds {
-  const [bounds, setBounds] = useState<ViewportBounds>({ left: 0, top: 0, width: 0, height: 0 })
-  
-  useEffect(() => {
-    const updateBounds = () => {
-      if (!containerRef.current) return
-      
-      const containerWidth = containerRef.current.clientWidth
-      const containerHeight = containerRef.current.clientHeight
-      
-      const targetAspect = targetWidth / targetHeight
-      const containerAspect = containerWidth / containerHeight
-      
-      let viewportWidth: number
-      let viewportHeight: number
-      
-      if (containerAspect > targetAspect) {
-        viewportHeight = containerHeight
-        viewportWidth = viewportHeight * targetAspect
-      } else {
-        viewportWidth = containerWidth
-        viewportHeight = viewportWidth / targetAspect
-      }
-      
-      const left = (containerWidth - viewportWidth) / 2
-      const top = (containerHeight - viewportHeight) / 2
-      
-      setBounds({ left, top, width: viewportWidth, height: viewportHeight })
-    }
-    
-    updateBounds()
-    
-    const observer = new ResizeObserver(updateBounds)
-    if (containerRef.current) {
-      observer.observe(containerRef.current)
-    }
-    
-    return () => observer.disconnect()
-  }, [containerRef, targetWidth, targetHeight])
-  
-  return bounds
-}
-
-// ============================================
-// Splat Component
-// ============================================
-function PumpRoomSplat({ src }: { src: string }) {
-  const { asset, loading, error } = useSplat(src)
+function PumpRoomSplat() {
+  const { asset, loading, error } = useSplat(SPLAT_URL)
   if (error || loading || !asset) return null
   return (
     <Entity position={[0, 0, 0]} rotation={[0, 0, 0]}>
@@ -123,6 +65,32 @@ function PumpRoomSplat({ src }: { src: string }) {
     </Entity>
   )
 }
+
+// ============================================
+// Static Scene - no props, no state, never re-renders
+// ============================================
+function StaticScene() {
+  return (
+    <>
+      <Entity name="camera" position={INITIAL.position} rotation={INITIAL.rotation}>
+        <Camera clearColor="#1a1a2e" fov={INITIAL.fov || 60} farClip={1000} nearClip={0.01} />
+      </Entity>
+      <PumpRoomSplat />
+    </>
+  )
+}
+
+// ============================================
+// SplatViewer - COMPLETELY ISOLATED from all state
+// This component renders ONCE and never re-renders
+// ============================================
+const SplatViewer = memo(function SplatViewer() {
+  return (
+    <Application graphicsDeviceOptions={{ antialias: false }}>
+      <StaticScene />
+    </Application>
+  )
+})
 
 // ============================================
 // Ellipse Helper - renders visually circular shapes in stretched SVG
@@ -150,7 +118,6 @@ function CircleAsEllipse({
   className, pointerEvents,
   onMouseDown, onMouseEnter, onMouseLeave, onClick, onContextMenu
 }: CircleAsEllipseProps) {
-  // Compensate for SVG stretch: shrink rx to appear circular
   const rx = r / aspectRatio
   const ry = r
   
@@ -203,7 +170,6 @@ function PolygonShape({
   const [hoverMidpoint, setHoverMidpoint] = useState<number | null>(null)
   const svgRef = useRef<SVGGElement>(null)
   
-  // NO scaling needed - coordinates are direct 0-100
   const pointsStr = points.map(p => `${p.x},${p.y}`).join(' ')
   
   const midpoints = points.map((p, i) => {
@@ -211,10 +177,8 @@ function PolygonShape({
     return { x: (p.x + next.x) / 2, y: (p.y + next.y) / 2 }
   })
   
-  // Check if midpoint too close to any vertex (accounting for aspect ratio in visual space)
   const isMidpointTooCloseToVertex = (midpoint: Point, minDist: number = 4): boolean => {
     for (const p of points) {
-      // Visual distance accounting for stretch
       const dx = (midpoint.x - p.x) / aspectRatio
       const dy = midpoint.y - p.y
       const dist = Math.sqrt(dx * dx + dy * dy)
@@ -223,7 +187,6 @@ function PolygonShape({
     return false
   }
   
-  // Global mouse tracking for smooth dragging
   useEffect(() => {
     if (draggingVertex === null) return
     
@@ -251,7 +214,6 @@ function PolygonShape({
     }
   }, [draggingVertex, onVertexDrag])
   
-  // Visual radii (in viewBox units)
   const VERTEX_R = 1.2
   const VERTEX_HOVER_R = 1.5
   const VERTEX_TOUCH_R = 3.5
@@ -277,13 +239,11 @@ function PolygonShape({
         }}
       />
       
-      {/* Midpoints (rendered first so vertices are on top) */}
       {isSelected && points.length >= 3 && midpoints.map((p, i) => {
         if (isMidpointTooCloseToVertex(p)) return null
         
         return (
           <g key={`m-${i}`}>
-            {/* Touch target */}
             <CircleAsEllipse
               cx={p.x}
               cy={p.y}
@@ -299,7 +259,6 @@ function PolygonShape({
               onMouseEnter={() => setHoverMidpoint(i)}
               onMouseLeave={() => setHoverMidpoint(null)}
             />
-            {/* Visual */}
             <CircleAsEllipse
               cx={p.x}
               cy={p.y}
@@ -314,10 +273,8 @@ function PolygonShape({
         )
       })}
       
-      {/* Vertices (on top) */}
       {isSelected && points.map((p, i) => (
         <g key={`v-${i}`}>
-          {/* Touch target */}
           <CircleAsEllipse
             cx={p.x}
             cy={p.y}
@@ -339,7 +296,6 @@ function PolygonShape({
             onMouseLeave={() => setHoverVertex(null)}
             onContextMenu={(e) => e.preventDefault()}
           />
-          {/* Visual */}
           <CircleAsEllipse
             cx={p.x}
             cy={p.y}
@@ -380,7 +336,6 @@ function DrawingPolygon({ points, mousePos, style, aspectRatio }: {
         strokeDasharray="1.5,0.75"
       />
       
-      {/* Close preview line */}
       {points.length >= 2 && mousePos && (
         <line
           x1={mousePos.x} y1={mousePos.y}
@@ -392,7 +347,6 @@ function DrawingPolygon({ points, mousePos, style, aspectRatio }: {
         />
       )}
       
-      {/* Vertices */}
       {points.map((p, i) => (
         <CircleAsEllipse
           key={i}
@@ -406,7 +360,6 @@ function DrawingPolygon({ points, mousePos, style, aspectRatio }: {
         />
       ))}
       
-      {/* Close zone indicator */}
       {points.length >= 3 && (
         <CircleAsEllipse
           cx={points[0].x}
@@ -423,7 +376,7 @@ function DrawingPolygon({ points, mousePos, style, aspectRatio }: {
 }
 
 // ============================================
-// SVG Overlay (positioned inside viewport bounds)
+// SVG Overlay
 // ============================================
 interface OverlayProps {
   hotspots: ParsedSplatHotspot[]
@@ -456,7 +409,6 @@ function HotspotSvgOverlay({
 }: OverlayProps) {
   const svgRef = useRef<SVGSVGElement>(null)
   
-  // Simple 0-100 in both axes
   const getMousePosition = (e: React.MouseEvent): Point => {
     if (!svgRef.current) return { x: 0, y: 0 }
     const rect = svgRef.current.getBoundingClientRect()
@@ -472,7 +424,6 @@ function HotspotSvgOverlay({
     if (mode === 'draw') {
       if (drawingPoints.length >= 3) {
         const first = drawingPoints[0]
-        // Distance check (visual space, accounting for aspect ratio)
         const dx = (pos.x - first.x) / aspectRatio
         const dy = pos.y - first.y
         const dist = Math.sqrt(dx * dx + dy * dy)
@@ -622,12 +573,11 @@ function StyleEditor({ style, onChange }: {
 }
 
 // ============================================
-// Frame Overlay - visual frame around viewport
+// Frame Overlay
 // ============================================
 function FrameOverlay() {
   return (
     <div className="absolute inset-0 pointer-events-none">
-      {/* Top edge */}
       <div 
         className="absolute top-0 left-0 right-0"
         style={{
@@ -636,7 +586,6 @@ function FrameOverlay() {
           boxShadow: 'inset 0 2px 4px rgba(255,255,255,0.1), inset 0 -2px 4px rgba(0,0,0,0.5)',
         }}
       />
-      {/* Bottom edge */}
       <div 
         className="absolute bottom-0 left-0 right-0"
         style={{
@@ -645,7 +594,6 @@ function FrameOverlay() {
           boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.5), inset 0 -2px 4px rgba(255,255,255,0.1)',
         }}
       />
-      {/* Left edge */}
       <div 
         className="absolute left-0"
         style={{
@@ -656,7 +604,6 @@ function FrameOverlay() {
           boxShadow: 'inset 2px 0 4px rgba(255,255,255,0.1), inset -2px 0 4px rgba(0,0,0,0.5)',
         }}
       />
-      {/* Right edge */}
       <div 
         className="absolute right-0"
         style={{
@@ -667,7 +614,6 @@ function FrameOverlay() {
           boxShadow: 'inset 2px 0 4px rgba(0,0,0,0.5), inset -2px 0 4px rgba(255,255,255,0.1)',
         }}
       />
-      {/* Inner shadow */}
       <div 
         className="absolute"
         style={{
@@ -683,10 +629,71 @@ function FrameOverlay() {
 }
 
 // ============================================
-// Main Component
+// Viewport Bounds Hook
 // ============================================
-export default function HotspotEditor() {
-  const viewportContainerRef = useRef<HTMLDivElement>(null)
+interface ViewportBounds {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+function useViewportBounds(
+  containerRef: React.RefObject<HTMLDivElement>,
+  targetWidth: number,
+  targetHeight: number
+): ViewportBounds {
+  const [bounds, setBounds] = useState<ViewportBounds>({ left: 0, top: 0, width: 0, height: 0 })
+  
+  useEffect(() => {
+    const updateBounds = () => {
+      if (!containerRef.current) return
+      
+      const containerWidth = containerRef.current.clientWidth
+      const containerHeight = containerRef.current.clientHeight
+      
+      const targetAspect = targetWidth / targetHeight
+      const containerAspect = containerWidth / containerHeight
+      
+      let viewportWidth: number
+      let viewportHeight: number
+      
+      if (containerAspect > targetAspect) {
+        viewportHeight = containerHeight
+        viewportWidth = viewportHeight * targetAspect
+      } else {
+        viewportWidth = containerWidth
+        viewportHeight = viewportWidth / targetAspect
+      }
+      
+      const left = (containerWidth - viewportWidth) / 2
+      const top = (containerHeight - viewportHeight) / 2
+      
+      setBounds({ left, top, width: viewportWidth, height: viewportHeight })
+    }
+    
+    updateBounds()
+    
+    const observer = new ResizeObserver(updateBounds)
+    if (containerRef.current) {
+      observer.observe(containerRef.current)
+    }
+    
+    return () => observer.disconnect()
+  }, [containerRef, targetWidth, targetHeight])
+  
+  return bounds
+}
+
+// ============================================
+// Editor UI - All the state lives here, separate from SplatViewer
+// ============================================
+function EditorUI({ bounds, aspectRatio, targetWidth, targetHeight }: {
+  bounds: ViewportBounds
+  aspectRatio: number
+  targetWidth: number
+  targetHeight: number
+}) {
   const { config, hotspots, loading, error, saveHotspotBounds } = useSplatData()
   
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -699,13 +706,6 @@ export default function HotspotEditor() {
   const [newName, setNewName] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [showStyle, setShowStyle] = useState(false)
-  
-  const targetWidth = config?.target_width || DEFAULT_TARGET_WIDTH
-  const targetHeight = config?.target_height || DEFAULT_TARGET_HEIGHT
-  const aspectRatio = targetWidth / targetHeight
-  
-  // Calculate viewport bounds within the main area (excluding sidebar)
-  const bounds = useViewportBounds(viewportContainerRef, targetWidth, targetHeight)
   
   const saveTimeoutRef = useRef<number>()
   
@@ -781,102 +781,68 @@ export default function HotspotEditor() {
   }
   
   const selectedHotspot = localHotspots?.find(h => h.id === selectedId)
-  
-  // Inner viewport (inside frame)
   const innerWidth = bounds.width > 0 ? bounds.width - FRAME_WIDTH * 2 : 0
   const innerHeight = bounds.height > 0 ? bounds.height - FRAME_WIDTH * 2 : 0
   
   return (
-    <div className="w-screen h-screen bg-black flex">
-      {/* Main viewport area */}
-      <div ref={viewportContainerRef} className="flex-1 relative">
-        {/* Letterbox/pillarbox black areas */}
-        {bounds.width > 0 && (
-          <>
-            {bounds.top > 0 && (
-              <>
-                <div className="absolute left-0 right-0 top-0 bg-black" style={{ height: bounds.top }} />
-                <div className="absolute left-0 right-0 bottom-0 bg-black" style={{ height: bounds.top }} />
-              </>
-            )}
-            {bounds.left > 0 && (
-              <>
-                <div className="absolute left-0 bg-black" style={{ top: bounds.top, width: bounds.left, height: bounds.height }} />
-                <div className="absolute right-0 bg-black" style={{ top: bounds.top, width: bounds.left, height: bounds.height }} />
-              </>
-            )}
-          </>
-        )}
-        
-        {/* Viewport container - both PlayCanvas and SVG go inside here */}
-        {bounds.width > 0 && innerWidth > 0 && (
-          <div 
-            className="absolute"
-            style={{
-              left: bounds.left + FRAME_WIDTH,
-              top: bounds.top + FRAME_WIDTH,
-              width: innerWidth,
-              height: innerHeight
-            }}
-          >
-            {/* PlayCanvas Application - fills this container */}
-            <Application graphicsDeviceOptions={{ antialias: false }}>
-              <Entity name="camera" position={INITIAL.position} rotation={INITIAL.rotation}>
-                <Camera clearColor="#1a1a2e" fov={INITIAL.fov || 60} farClip={1000} nearClip={0.01} />
-              </Entity>
-              <PumpRoomSplat src={SPLAT_URL} />
-            </Application>
-            
-            {/* SVG Overlay - same container, coordinates naturally align */}
-            <HotspotSvgOverlay
-              hotspots={(localHotspots ?? []).filter(h => h.shape === 'polygon')}
-              selectedId={selectedId}
-              onSelectHotspot={handleSelectHotspot}
-              onUpdateBounds={handleUpdateBounds}
-              mode={mode}
-              drawingPoints={drawingPoints}
-              onAddDrawingPoint={(p) => setDrawingPoints(prev => [...prev, p])}
-              onCompleteDrawing={() => {}}
-              mousePos={mousePos}
-              onMouseMove={setMousePos}
-              style={style}
-              aspectRatio={aspectRatio}
-            />
-          </div>
-        )}
-        
-        {/* Frame overlay - positioned within viewport bounds */}
-        {bounds.width > 0 && (
-          <div 
-            className="absolute pointer-events-none"
-            style={{
-              left: bounds.left,
-              top: bounds.top,
-              width: bounds.width,
-              height: bounds.height
-            }}
-          >
-            <FrameOverlay />
-            
-            {/* Dimension label */}
-            <div 
-              className="absolute text-[10px] px-2 py-0.5 rounded"
-              style={{ 
-                left: 32, 
-                top: 32,
-                backgroundColor: 'rgba(0,0,0,0.8)',
-                color: 'rgba(139, 115, 71, 0.8)'
-              }}
-            >
-              {targetWidth}×{targetHeight} viewport
-            </div>
-          </div>
-        )}
-      </div>
+    <>
+      {/* SVG Overlay - positioned in viewport */}
+      {bounds.width > 0 && innerWidth > 0 && (
+        <div 
+          className="absolute z-10"
+          style={{
+            left: bounds.left + FRAME_WIDTH,
+            top: bounds.top + FRAME_WIDTH,
+            width: innerWidth,
+            height: innerHeight
+          }}
+        >
+          <HotspotSvgOverlay
+            hotspots={(localHotspots ?? []).filter(h => h.shape === 'polygon')}
+            selectedId={selectedId}
+            onSelectHotspot={handleSelectHotspot}
+            onUpdateBounds={handleUpdateBounds}
+            mode={mode}
+            drawingPoints={drawingPoints}
+            onAddDrawingPoint={(p) => setDrawingPoints(prev => [...prev, p])}
+            onCompleteDrawing={() => {}}
+            mousePos={mousePos}
+            onMouseMove={setMousePos}
+            style={style}
+            aspectRatio={aspectRatio}
+          />
+        </div>
+      )}
       
-      {/* Sidebar - outside viewport container, no overflow issues */}
-      <div className="w-64 bg-neutral-900 text-white text-sm flex flex-col border-l border-neutral-800">
-        {/* Header */}
+      {/* Frame overlay */}
+      {bounds.width > 0 && (
+        <div 
+          className="absolute pointer-events-none z-20"
+          style={{
+            left: bounds.left,
+            top: bounds.top,
+            width: bounds.width,
+            height: bounds.height
+          }}
+        >
+          <FrameOverlay />
+          
+          <div 
+            className="absolute text-[10px] px-2 py-0.5 rounded"
+            style={{ 
+              left: 32, 
+              top: 32,
+              backgroundColor: 'rgba(0,0,0,0.8)',
+              color: 'rgba(139, 115, 71, 0.8)'
+            }}
+          >
+            {targetWidth}×{targetHeight} viewport
+          </div>
+        </div>
+      )}
+      
+      {/* Sidebar */}
+      <div className="w-64 bg-neutral-900 text-white text-sm flex flex-col border-l border-neutral-800 z-30">
         <div className="p-3 border-b border-neutral-700">
           <Link to="/admin" className="text-amber-600 hover:text-amber-500 text-xs">
             ← Back to Admin
@@ -887,7 +853,6 @@ export default function HotspotEditor() {
         {loading && <div className="p-3 bg-neutral-800 text-neutral-400 text-xs">Loading...</div>}
         {error && <div className="p-3 bg-red-900/30 text-red-400 text-xs">{error}</div>}
         
-        {/* Mode Toggle */}
         <div className="p-3 border-b border-neutral-700">
           <div className="flex gap-1">
             <button
@@ -917,7 +882,6 @@ export default function HotspotEditor() {
           )}
         </div>
         
-        {/* Save new hotspot */}
         {mode === 'draw' && drawingPoints.length >= 3 && (
           <div className="p-3 border-b border-neutral-700 bg-green-900/20">
             <p className="text-[10px] text-green-400 mb-2">Ready to save ({drawingPoints.length} points)</p>
@@ -940,7 +904,6 @@ export default function HotspotEditor() {
           </div>
         )}
         
-        {/* Selected hotspot info */}
         {mode === 'select' && selectedHotspot && (
           <div className="p-3 border-b border-neutral-700 bg-amber-900/10">
             <div className="flex items-center justify-between">
@@ -977,7 +940,6 @@ export default function HotspotEditor() {
           </div>
         )}
         
-        {/* Style editor */}
         <div className="p-3 border-b border-neutral-700">
           <button onClick={() => setShowStyle(!showStyle)} className="text-[10px] text-neutral-500 hover:text-neutral-400 flex items-center gap-1">
             <span>{showStyle ? '▼' : '▶'}</span>
@@ -990,7 +952,6 @@ export default function HotspotEditor() {
           )}
         </div>
         
-        {/* Hotspot list */}
         <div className="flex-1 overflow-y-auto p-3">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[9px] text-neutral-600 font-medium">HOTSPOTS ({localHotspots?.length ?? 0})</span>
@@ -1020,10 +981,74 @@ export default function HotspotEditor() {
           )}
         </div>
         
-        {/* Footer */}
         <div className="p-2 border-t border-neutral-800 text-[9px] text-neutral-700">
           {config?.id ? `Config: ${config.id.slice(0,8)}...` : <span className="text-red-400">No config loaded</span>}
         </div>
+      </div>
+    </>
+  )
+}
+
+// ============================================
+// Main Component - Minimal, just layout
+// ============================================
+export default function HotspotEditor() {
+  const viewportContainerRef = useRef<HTMLDivElement>(null)
+  const { config } = useSplatData()
+  
+  const targetWidth = config?.target_width || DEFAULT_TARGET_WIDTH
+  const targetHeight = config?.target_height || DEFAULT_TARGET_HEIGHT
+  const aspectRatio = targetWidth / targetHeight
+  
+  const bounds = useViewportBounds(viewportContainerRef, targetWidth, targetHeight)
+  
+  const innerWidth = bounds.width > 0 ? bounds.width - FRAME_WIDTH * 2 : 0
+  const innerHeight = bounds.height > 0 ? bounds.height - FRAME_WIDTH * 2 : 0
+  
+  return (
+    <div className="w-screen h-screen bg-black flex">
+      {/* Main viewport area */}
+      <div ref={viewportContainerRef} className="flex-1 relative">
+        {/* Letterbox/pillarbox black areas */}
+        {bounds.width > 0 && (
+          <>
+            {bounds.top > 0 && (
+              <>
+                <div className="absolute left-0 right-0 top-0 bg-black" style={{ height: bounds.top }} />
+                <div className="absolute left-0 right-0 bottom-0 bg-black" style={{ height: bounds.top }} />
+              </>
+            )}
+            {bounds.left > 0 && (
+              <>
+                <div className="absolute left-0 bg-black" style={{ top: bounds.top, width: bounds.left, height: bounds.height }} />
+                <div className="absolute right-0 bg-black" style={{ top: bounds.top, width: bounds.left, height: bounds.height }} />
+              </>
+            )}
+          </>
+        )}
+        
+        {/* PlayCanvas container - SplatViewer is isolated, won't re-render */}
+        {bounds.width > 0 && innerWidth > 0 && (
+          <div 
+            className="absolute"
+            style={{
+              left: bounds.left + FRAME_WIDTH,
+              top: bounds.top + FRAME_WIDTH,
+              width: innerWidth,
+              height: innerHeight
+            }}
+          >
+            <SplatViewer />
+          </div>
+        )}
+        
+        {/* Editor UI - all state and interactivity */}
+        <EditorUI 
+          bounds={bounds} 
+          aspectRatio={aspectRatio}
+          targetWidth={targetWidth}
+          targetHeight={targetHeight}
+        />
       </div>
     </div>
   )
