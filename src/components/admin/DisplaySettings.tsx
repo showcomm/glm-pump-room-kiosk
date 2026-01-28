@@ -10,6 +10,8 @@
  * 
  * CRITICAL: PlayCanvas Application components must have STATIC props.
  * Camera position is set imperatively via PlayCanvas API, not React props.
+ * 
+ * FIX: Don't render PlayCanvas until container has non-zero dimensions.
  */
 
 import React, { useState, useEffect, useRef, memo } from 'react'
@@ -36,7 +38,7 @@ const STATIC_CAMERA = {
 }
 
 // ============================================
-// Aspect Ratio Container
+// Aspect Ratio Container with ready check
 // ============================================
 function AspectRatioContainer({ 
   width,
@@ -45,7 +47,7 @@ function AspectRatioContainer({
 }: { 
   width: number
   height: number
-  children: React.ReactNode 
+  children: (ready: boolean) => React.ReactNode 
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
@@ -85,6 +87,8 @@ function AspectRatioContainer({
     return () => resizeObserver.disconnect()
   }, [aspectRatio])
   
+  const ready = dimensions.width > 0 && dimensions.height > 0
+  
   return (
     <div 
       ref={containerRef}
@@ -92,11 +96,11 @@ function AspectRatioContainer({
     >
       <div 
         className="relative border-2 border-amber-600/50"
-        style={{ width: dimensions.width, height: dimensions.height }}
+        style={{ width: dimensions.width || '100%', height: dimensions.height || '100%' }}
       >
-        {children}
+        {children(ready)}
         {/* Resolution indicator */}
-        <div className="absolute top-2 left-2 bg-black/70 text-amber-500 text-xs px-2 py-1 rounded">
+        <div className="absolute top-2 left-2 bg-black/70 text-amber-500 text-xs px-2 py-1 rounded z-10">
           {width}×{height}
         </div>
       </div>
@@ -190,6 +194,27 @@ function CameraBroadcaster() {
   
   return null
 }
+
+// The actual PlayCanvas scene - memoized with no props
+const SplatScene = memo(function SplatScene({ 
+  configPosition, 
+  configRotation 
+}: { 
+  configPosition: [number, number, number] | null
+  configRotation: [number, number, number] | null 
+}) {
+  return (
+    <Application graphicsDeviceOptions={{ antialias: false }}>
+      <CameraEntity />
+      <CameraInitializer 
+        position={configPosition}
+        rotation={configRotation}
+      />
+      <PumpRoomSplat src={SPLAT_URL} />
+      <CameraBroadcaster />
+    </Application>
+  )
+})
 
 // ============================================
 // Resolution Selector
@@ -436,15 +461,20 @@ export default function DisplaySettings() {
       {/* Viewer area */}
       <div className="flex-1 relative bg-neutral-950">
         <AspectRatioContainer width={targetWidth} height={targetHeight}>
-          <Application graphicsDeviceOptions={{ antialias: false }}>
-            <CameraEntity />
-            <CameraInitializer 
-              position={configCamera.position}
-              rotation={configCamera.rotation}
-            />
-            <PumpRoomSplat src={SPLAT_URL} />
-            <CameraBroadcaster />
-          </Application>
+          {(ready) => (
+            <>
+              {ready ? (
+                <SplatScene 
+                  configPosition={configCamera.position}
+                  configRotation={configCamera.rotation}
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center text-neutral-600 text-sm">
+                  Initializing...
+                </div>
+              )}
+            </>
+          )}
         </AspectRatioContainer>
       </div>
       
