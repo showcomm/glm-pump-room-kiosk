@@ -36,8 +36,6 @@ const DEFAULT_TARGET_WIDTH = 1920
 const DEFAULT_TARGET_HEIGHT = 1080
 const FRAME_WIDTH = 24
 
-const STYLE_STORAGE_KEY = 'hotspot-editor-style'
-
 const DEFAULT_STYLE = {
   fillColor: '#8b7355',
   fillOpacity: 0.15,
@@ -59,42 +57,6 @@ interface ViewportBounds {
   top: number
   width: number
   height: number
-}
-
-// ============================================
-// Style Persistence Hook
-// ============================================
-function usePersistedStyle(): [HotspotStyle, (s: HotspotStyle) => void] {
-  const [style, setStyleState] = useState<HotspotStyle>(() => {
-    // Initialize from localStorage
-    try {
-      const stored = localStorage.getItem(STYLE_STORAGE_KEY)
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        // Validate it has the expected shape
-        if (parsed.fillColor && parsed.strokeColor && 
-            typeof parsed.fillOpacity === 'number' && 
-            typeof parsed.strokeWidth === 'number') {
-          return parsed as HotspotStyle
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to load style from localStorage:', e)
-    }
-    return DEFAULT_STYLE
-  })
-
-  const setStyle = useCallback((newStyle: HotspotStyle) => {
-    setStyleState(newStyle)
-    // Persist to localStorage
-    try {
-      localStorage.setItem(STYLE_STORAGE_KEY, JSON.stringify(newStyle))
-    } catch (e) {
-      console.warn('Failed to save style to localStorage:', e)
-    }
-  }, [])
-
-  return [style, setStyle]
 }
 
 // ============================================
@@ -464,7 +426,13 @@ function HotspotSvgOverlay({
 // ============================================
 // Style Editor with Preview
 // ============================================
-function StyleEditor({ style, onChange }: { style: HotspotStyle; onChange: (s: HotspotStyle) => void }) {
+interface StyleEditorProps {
+  style: HotspotStyle
+  onChange: (s: HotspotStyle) => void
+  saving: boolean
+}
+
+function StyleEditor({ style, onChange, saving }: StyleEditorProps) {
   const handleReset = () => {
     onChange(DEFAULT_STYLE)
   }
@@ -490,6 +458,7 @@ function StyleEditor({ style, onChange }: { style: HotspotStyle; onChange: (s: H
             }} 
           />
         </div>
+        {saving && <span className="text-amber-500 text-[9px]">💾</span>}
       </div>
       
       <div className="flex items-center gap-2">
@@ -593,6 +562,7 @@ interface SidebarProps {
   drawingPoints: Point[]
   setDrawingPoints: (p: Point[]) => void
   saving: boolean
+  savingStyle: boolean
   loading: boolean
   error: string | null
   configId: string | null
@@ -605,7 +575,7 @@ interface SidebarProps {
 function Sidebar({
   mode, setMode, selectedId, setSelectedId,
   localHotspots, drawingPoints, setDrawingPoints,
-  saving, loading, error, configId,
+  saving, savingStyle, loading, error, configId,
   onCreateHotspot, onDeleteHotspot, style, setStyle
 }: SidebarProps) {
   const [newName, setNewName] = useState('')
@@ -708,7 +678,7 @@ function Sidebar({
         <button onClick={() => setShowStyle(!showStyle)} className="text-[10px] text-neutral-400 hover:text-neutral-300 flex items-center gap-1 mb-2">
           <span>{showStyle ? '▼' : '▶'}</span><span>Polygon Style</span>
         </button>
-        {showStyle && <StyleEditor style={style} onChange={setStyle} />}
+        {showStyle && <StyleEditor style={style} onChange={setStyle} saving={savingStyle} />}
       </div>
       
       {/* Hotspot list */}
@@ -750,11 +720,26 @@ function Sidebar({
 }
 
 // ============================================
+// Helper: Extract style from config settings
+// ============================================
+function getStyleFromConfig(config: { settings?: unknown } | null): HotspotStyle {
+  if (!config?.settings) return DEFAULT_STYLE
+  const settings = config.settings as Record<string, unknown>
+  const stored = settings.hotspot_style as HotspotStyle | undefined
+  if (stored?.fillColor && stored?.strokeColor && 
+      typeof stored?.fillOpacity === 'number' && 
+      typeof stored?.strokeWidth === 'number') {
+    return stored
+  }
+  return DEFAULT_STYLE
+}
+
+// ============================================
 // Main Component
 // ============================================
 export default function HotspotEditor() {
   const viewportContainerRef = useRef<HTMLDivElement>(null)
-  const { config, hotspots, loading, error, saveHotspotBounds } = useSplatData()
+  const { config, hotspots, loading, error, saveHotspotBounds, saveConfigSettings } = useSplatData()
   
   // All editor state
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -762,10 +747,15 @@ export default function HotspotEditor() {
   const [drawingPoints, setDrawingPoints] = useState<Point[]>([])
   const [mousePos, setMousePos] = useState<Point | null>(null)
   const [saving, setSaving] = useState(false)
-  const [style, setStyle] = usePersistedStyle() // Now persists to localStorage!
+  const [savingStyle, setSavingStyle] = useState(false)
   const [localHotspots, setLocalHotspots] = useState<ParsedSplatHotspot[]>([])
   
+  // Style state - initialized from config.settings.hotspot_style
+  const [style, setStyleLocal] = useState<HotspotStyle>(DEFAULT_STYLE)
+  const styleInitialized = useRef(false)
+  
   const saveTimeoutRef = useRef<number>()
+  const styleSaveTimeoutRef = useRef<number>()
   
   const targetWidth = config?.target_width || DEFAULT_TARGET_WIDTH
   const targetHeight = config?.target_height || DEFAULT_TARGET_HEIGHT
@@ -775,7 +765,30 @@ export default function HotspotEditor() {
   const innerWidth = bounds.width > 0 ? bounds.width - FRAME_WIDTH * 2 : 0
   const innerHeight = bounds.height > 0 ? bounds.height - FRAME_WIDTH * 2 : 0
   
+  // Sync hotspots from server
   useEffect(() => { setLocalHotspots(hotspots ?? []) }, [hotspots])
+  
+  // Load style from config.settings when config loads (only once)
+  useEffect(() => {
+    if (config && !styleInitialized.current) {
+      const loadedStyle = getStyleFromConfig(config)
+      setStyleLocal(loadedStyle)
+      styleInitialized.current = true
+    }
+  }, [config])
+  
+  // Style change handler - updates local state and saves to Supabase with debounce
+  const setStyle = useCallback((newStyle: HotspotStyle) => {
+    setStyleLocal(newStyle)
+    
+    // Debounce save to database
+    if (styleSaveTimeoutRef.current) clearTimeout(styleSaveTimeoutRef.current)
+    styleSaveTimeoutRef.current = window.setTimeout(async () => {
+      setSavingStyle(true)
+      await saveConfigSettings({ hotspot_style: newStyle })
+      setSavingStyle(false)
+    }, 500)
+  }, [saveConfigSettings])
   
   // Complete drawing - creates a new hotspot and prompts for name
   const handleCompleteDrawing = () => {
@@ -881,7 +894,8 @@ export default function HotspotEditor() {
         selectedId={selectedId} setSelectedId={setSelectedId}
         localHotspots={localHotspots}
         drawingPoints={drawingPoints} setDrawingPoints={setDrawingPoints}
-        saving={saving} loading={loading} error={error}
+        saving={saving} savingStyle={savingStyle}
+        loading={loading} error={error}
         configId={config?.id ?? null}
         onCreateHotspot={handleCreateHotspot}
         onDeleteHotspot={handleDeleteHotspot}
