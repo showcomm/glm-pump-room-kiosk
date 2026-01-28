@@ -1,15 +1,20 @@
 /**
  * Zustand store for kiosk state management
+ * 
+ * Updated to use database hotspots instead of hardcoded equipment/viewpoints
  */
 
 import { create } from 'zustand'
-import { getOverviewViewpoint, getViewpointForEquipment, CameraViewpoint } from '../data/viewpoints'
-import { equipment } from '../data/equipment'
-import { Equipment } from '../data/types'
+import { getOverviewViewpoint, CameraViewpoint } from '../data/viewpoints'
+import type { ParsedSplatHotspot } from '../lib/database.types'
 
 type Language = 'en' | 'fr'
 
 interface KioskStore {
+  // Hotspot data from database
+  hotspots: ParsedSplatHotspot[]
+  setHotspots: (hotspots: ParsedSplatHotspot[]) => void
+  
   // Language
   language: Language
   setLanguage: (lang: Language) => void
@@ -20,12 +25,12 @@ interface KioskStore {
   targetViewpoint: CameraViewpoint | null
   isTransitioning: boolean
   
-  // Selected equipment
-  selectedEquipmentId: string | null
-  selectedEquipment: Equipment | null
+  // Selected hotspot
+  selectedHotspotSlug: string | null
+  selectedHotspot: ParsedSplatHotspot | null
   
   // Actions
-  navigateToEquipment: (equipmentId: string) => void
+  navigateToEquipment: (hotspotSlug: string) => void
   navigateToOverview: () => void
   clearSelection: () => void
   completeTransition: () => void
@@ -43,7 +48,44 @@ interface KioskStore {
 
 const IDLE_TIMEOUT_MS = 60000 // 60 seconds
 
+// Helper to convert hotspot viewpoint to CameraViewpoint format
+function hotspotToViewpoint(hotspot: ParsedSplatHotspot): CameraViewpoint | null {
+  if (!hotspot.viewpoint_position || hotspot.viewpoint_position.length !== 3) {
+    console.warn(`Hotspot ${hotspot.slug} has no viewpoint set`)
+    return null
+  }
+  
+  if (!hotspot.viewpoint_rotation || hotspot.viewpoint_rotation.length !== 3) {
+    console.warn(`Hotspot ${hotspot.slug} has no rotation set`)
+    return null
+  }
+  
+  return {
+    id: `${hotspot.slug}-view`,
+    equipment_id: hotspot.slug,
+    position: [
+      Number(hotspot.viewpoint_position[0]),
+      Number(hotspot.viewpoint_position[1]),
+      Number(hotspot.viewpoint_position[2])
+    ],
+    rotation: [
+      Number(hotspot.viewpoint_rotation[0]),
+      Number(hotspot.viewpoint_rotation[1]),
+      Number(hotspot.viewpoint_rotation[2])
+    ],
+    fov: Number(hotspot.viewpoint_fov || 60),
+    label: {
+      en: hotspot.name_en,
+      fr: hotspot.name_fr || hotspot.name_en
+    }
+  }
+}
+
 export const useKioskStore = create<KioskStore>((set, get) => ({
+  // Hotspot data
+  hotspots: [],
+  setHotspots: (hotspots) => set({ hotspots }),
+  
   // Language
   language: 'en',
   setLanguage: (lang) => set({ language: lang }),
@@ -56,25 +98,35 @@ export const useKioskStore = create<KioskStore>((set, get) => ({
   targetViewpoint: null,
   isTransitioning: false,
   
-  // Selected equipment
-  selectedEquipmentId: null,
-  selectedEquipment: null,
+  // Selected hotspot
+  selectedHotspotSlug: null,
+  selectedHotspot: null,
   
   // Actions
-  navigateToEquipment: (equipmentId) => {
-    const viewpoint = getViewpointForEquipment(equipmentId)
-    const equipmentData = equipment.find(e => e.id === equipmentId)
+  navigateToEquipment: (hotspotSlug) => {
+    const { hotspots } = get()
+    const hotspot = hotspots.find(h => h.slug === hotspotSlug)
     
-    if (viewpoint && equipmentData) {
-      set({
-        targetViewpoint: viewpoint,
-        isTransitioning: true,
-        selectedEquipmentId: equipmentId,
-        selectedEquipment: equipmentData,
-        lastInteractionTime: Date.now(),
-        isIdle: false
-      })
+    if (!hotspot) {
+      console.error(`Hotspot not found: ${hotspotSlug}`)
+      return
     }
+    
+    const viewpoint = hotspotToViewpoint(hotspot)
+    
+    if (!viewpoint) {
+      console.error(`Hotspot ${hotspotSlug} has no valid viewpoint data`)
+      return
+    }
+    
+    set({
+      targetViewpoint: viewpoint,
+      isTransitioning: true,
+      selectedHotspotSlug: hotspotSlug,
+      selectedHotspot: hotspot,
+      lastInteractionTime: Date.now(),
+      isIdle: false
+    })
   },
   
   navigateToOverview: () => {
@@ -82,16 +134,16 @@ export const useKioskStore = create<KioskStore>((set, get) => ({
     set({
       targetViewpoint: overview,
       isTransitioning: true,
-      selectedEquipmentId: null,
-      selectedEquipment: null,
+      selectedHotspotSlug: null,
+      selectedHotspot: null,
       lastInteractionTime: Date.now(),
       isIdle: false
     })
   },
   
   clearSelection: () => set({
-    selectedEquipmentId: null,
-    selectedEquipment: null
+    selectedHotspotSlug: null,
+    selectedHotspot: null
   }),
   
   completeTransition: () => {
