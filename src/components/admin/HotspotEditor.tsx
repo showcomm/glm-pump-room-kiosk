@@ -6,6 +6,8 @@
  * 
  * ASPECT RATIO: Reads from config's target_width/height so hotspot coordinates
  * match between admin editor and deployed kiosk regardless of browser size.
+ * 
+ * FIX: Don't render PlayCanvas until container has non-zero dimensions.
  */
 
 import React, { useState, useEffect, useRef, memo } from 'react'
@@ -56,6 +58,7 @@ type EditorMode = 'select' | 'draw'
 // ============================================
 // Aspect Ratio Container
 // Maintains exact kiosk aspect ratio with letterboxing
+// Returns ready=true only when dimensions are computed
 // ============================================
 function AspectRatioContainer({ 
   width,
@@ -64,7 +67,7 @@ function AspectRatioContainer({
 }: { 
   width: number
   height: number
-  children: React.ReactNode 
+  children: (ready: boolean, containerDims: { width: number; height: number }) => React.ReactNode 
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
@@ -104,6 +107,8 @@ function AspectRatioContainer({
     return () => resizeObserver.disconnect()
   }, [aspectRatio])
   
+  const ready = dimensions.width > 0 && dimensions.height > 0
+  
   return (
     <div 
       ref={containerRef}
@@ -111,12 +116,12 @@ function AspectRatioContainer({
     >
       <div 
         style={{ 
-          width: dimensions.width, 
-          height: dimensions.height,
+          width: dimensions.width || '100%', 
+          height: dimensions.height || '100%',
           position: 'relative'
         }}
       >
-        {children}
+        {children(ready, dimensions)}
       </div>
     </div>
   )
@@ -841,20 +846,30 @@ export default function HotspotEditor() {
       {/* Viewer area with fixed aspect ratio from config */}
       <div className="flex-1 relative bg-neutral-950">
         <AspectRatioContainer width={targetWidth} height={targetHeight}>
-          <SplatScene />
-          <Overlay
-            hotspots={localHotspots.filter(h => h.shape === 'polygon')}
-            selectedId={selectedId}
-            onSelectHotspot={handleSelectHotspot}
-            onUpdateBounds={handleUpdateBounds}
-            mode={mode}
-            drawingPoints={drawingPoints}
-            onAddDrawingPoint={(p) => setDrawingPoints(prev => [...prev, p])}
-            onCompleteDrawing={() => {}}
-            mousePos={mousePos}
-            onMouseMove={setMousePos}
-            style={style}
-          />
+          {(ready, dims) => (
+            <>
+              {/* Only render PlayCanvas when container has proper dimensions */}
+              {ready && <SplatScene />}
+              {!ready && (
+                <div className="absolute inset-0 flex items-center justify-center text-neutral-600 text-sm">
+                  Initializing...
+                </div>
+              )}
+              <Overlay
+                hotspots={localHotspots.filter(h => h.shape === 'polygon')}
+                selectedId={selectedId}
+                onSelectHotspot={handleSelectHotspot}
+                onUpdateBounds={handleUpdateBounds}
+                mode={mode}
+                drawingPoints={drawingPoints}
+                onAddDrawingPoint={(p) => setDrawingPoints(prev => [...prev, p])}
+                onCompleteDrawing={() => {}}
+                mousePos={mousePos}
+                onMouseMove={setMousePos}
+                style={style}
+              />
+            </>
+          )}
         </AspectRatioContainer>
       </div>
       
