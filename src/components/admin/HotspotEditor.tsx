@@ -16,7 +16,7 @@
  * - viewBox="0 0 100 100" with preserveAspectRatio="none"
  */
 
-import React, { useState, useEffect, useRef, memo } from 'react'
+import React, { useState, useEffect, useRef, memo, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat } from '@playcanvas/react/components'
@@ -36,12 +36,16 @@ const DEFAULT_TARGET_WIDTH = 1920
 const DEFAULT_TARGET_HEIGHT = 1080
 const FRAME_WIDTH = 24
 
+const STYLE_STORAGE_KEY = 'hotspot-editor-style'
+
 const DEFAULT_STYLE = {
   fillColor: '#8b7355',
   fillOpacity: 0.15,
   strokeColor: '#c4a574',
   strokeWidth: 0.4
 }
+
+type HotspotStyle = typeof DEFAULT_STYLE
 
 interface Point {
   x: number
@@ -55,6 +59,42 @@ interface ViewportBounds {
   top: number
   width: number
   height: number
+}
+
+// ============================================
+// Style Persistence Hook
+// ============================================
+function usePersistedStyle(): [HotspotStyle, (s: HotspotStyle) => void] {
+  const [style, setStyleState] = useState<HotspotStyle>(() => {
+    // Initialize from localStorage
+    try {
+      const stored = localStorage.getItem(STYLE_STORAGE_KEY)
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        // Validate it has the expected shape
+        if (parsed.fillColor && parsed.strokeColor && 
+            typeof parsed.fillOpacity === 'number' && 
+            typeof parsed.strokeWidth === 'number') {
+          return parsed as HotspotStyle
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load style from localStorage:', e)
+    }
+    return DEFAULT_STYLE
+  })
+
+  const setStyle = useCallback((newStyle: HotspotStyle) => {
+    setStyleState(newStyle)
+    // Persist to localStorage
+    try {
+      localStorage.setItem(STYLE_STORAGE_KEY, JSON.stringify(newStyle))
+    } catch (e) {
+      console.warn('Failed to save style to localStorage:', e)
+    }
+  }, [])
+
+  return [style, setStyle]
 }
 
 // ============================================
@@ -145,7 +185,7 @@ function CircleAsEllipse({
 interface PolygonShapeProps {
   points: Point[]
   isSelected: boolean
-  style: typeof DEFAULT_STYLE
+  style: HotspotStyle
   aspectRatio: number
   onVertexDrag?: (index: number, newPos: Point) => void
   onMidpointClick?: (index: number) => void
@@ -270,7 +310,7 @@ function PolygonShape({
 // Drawing Polygon
 // ============================================
 function DrawingPolygon({ points, mousePos, style, aspectRatio }: { 
-  points: Point[]; mousePos: Point | null; style: typeof DEFAULT_STYLE; aspectRatio: number
+  points: Point[]; mousePos: Point | null; style: HotspotStyle; aspectRatio: number
 }) {
   if (points.length === 0) return null
   
@@ -315,7 +355,7 @@ interface OverlayProps {
   onCompleteDrawing: () => void
   mousePos: Point | null
   onMouseMove: (pos: Point) => void
-  style: typeof DEFAULT_STYLE
+  style: HotspotStyle
   aspectRatio: number
 }
 
@@ -424,7 +464,11 @@ function HotspotSvgOverlay({
 // ============================================
 // Style Editor with Preview
 // ============================================
-function StyleEditor({ style, onChange }: { style: typeof DEFAULT_STYLE; onChange: (s: typeof DEFAULT_STYLE) => void }) {
+function StyleEditor({ style, onChange }: { style: HotspotStyle; onChange: (s: HotspotStyle) => void }) {
+  const handleReset = () => {
+    onChange(DEFAULT_STYLE)
+  }
+
   return (
     <div className="space-y-3 text-[10px]">
       {/* Preview swatch */}
@@ -467,6 +511,13 @@ function StyleEditor({ style, onChange }: { style: typeof DEFAULT_STYLE; onChang
           className="flex-1 h-1 accent-amber-600" />
         <span className="text-neutral-500 w-8 text-right">{style.strokeWidth.toFixed(1)}</span>
       </div>
+
+      <button 
+        onClick={handleReset}
+        className="text-neutral-500 hover:text-neutral-400 text-[9px] underline"
+      >
+        Reset to defaults
+      </button>
     </div>
   )
 }
@@ -547,8 +598,8 @@ interface SidebarProps {
   configId: string | null
   onCreateHotspot: (name: string) => void
   onDeleteHotspot: (id: string) => void
-  style: typeof DEFAULT_STYLE
-  setStyle: (s: typeof DEFAULT_STYLE) => void
+  style: HotspotStyle
+  setStyle: (s: HotspotStyle) => void
 }
 
 function Sidebar({
@@ -711,7 +762,7 @@ export default function HotspotEditor() {
   const [drawingPoints, setDrawingPoints] = useState<Point[]>([])
   const [mousePos, setMousePos] = useState<Point | null>(null)
   const [saving, setSaving] = useState(false)
-  const [style, setStyle] = useState(DEFAULT_STYLE)
+  const [style, setStyle] = usePersistedStyle() // Now persists to localStorage!
   const [localHotspots, setLocalHotspots] = useState<ParsedSplatHotspot[]>([])
   
   const saveTimeoutRef = useRef<number>()
