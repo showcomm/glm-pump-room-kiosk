@@ -14,6 +14,8 @@
  * COORDINATE SYSTEM:
  * - Stored coordinates are 0-100 percentages in both X and Y
  * - viewBox="0 0 100 100" with preserveAspectRatio="none"
+ * - Because the SVG stretches to fit 1920x1080, we need to compensate for aspect ratio
+ *   when calculating distances (multiply dx by aspectRatio, not divide)
  */
 
 import React, { useState, useEffect, useRef, memo, useCallback } from 'react'
@@ -174,6 +176,18 @@ function CircleAsEllipse({
 }
 
 // ============================================
+// Helper: Calculate visual distance between two points
+// Accounts for SVG stretching due to preserveAspectRatio="none"
+// ============================================
+function visualDistance(p1: Point, p2: Point, aspectRatio: number): number {
+  // The SVG viewBox is 100x100 but stretched to fit the container (e.g. 1920x1080)
+  // To get equal visual distance in all directions, multiply dx by aspectRatio
+  const dx = (p2.x - p1.x) * aspectRatio
+  const dy = p2.y - p1.y
+  return Math.sqrt(dx * dx + dy * dy)
+}
+
+// ============================================
 // Helper: Darken a hex color
 // ============================================
 function darkenColor(hex: string, factor: number = 0.4): string {
@@ -224,9 +238,7 @@ function PolygonShape({
   
   const isMidpointTooCloseToVertex = (midpoint: Point, minDist: number = 4): boolean => {
     for (const p of points) {
-      const dx = (midpoint.x - p.x) / aspectRatio
-      const dy = midpoint.y - p.y
-      if (Math.sqrt(dx * dx + dy * dy) < minDist) return true
+      if (visualDistance(midpoint, p, aspectRatio) < minDist) return true
     }
     return false
   }
@@ -436,12 +448,11 @@ function HotspotSvgOverlay({
     
     const pos = getMousePosition(e)
     
-    // Check if clicking near first point to close (with larger threshold)
+    // Check if clicking near first point to close
+    // Close zone radius is 4 SVG units (shown as ellipse), threshold is 6 for easier clicking
     if (drawingPoints.length >= 3) {
       const first = drawingPoints[0]
-      const dx = (pos.x - first.x) / aspectRatio
-      const dy = pos.y - first.y
-      const dist = Math.sqrt(dx * dx + dy * dy)
+      const dist = visualDistance(pos, first, aspectRatio)
       if (dist < 6) {
         onCompleteDrawing()
         return
