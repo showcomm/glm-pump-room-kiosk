@@ -98,6 +98,38 @@ const SplatViewer = memo(function SplatViewer() {
 })
 
 // ============================================
+// SVG Filter Definitions for Glow Effect
+// ============================================
+function SvgFilters() {
+  return (
+    <defs>
+      {/* Soft glow filter - creates a blurred shadow behind strokes */}
+      <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="0.8" result="blur" />
+        <feMerge>
+          <feMergeNode in="blur" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+      
+      {/* Stronger glow for selected state */}
+      <filter id="glow-selected" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="1.2" result="blur" />
+        <feMerge>
+          <feMergeNode in="blur" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+      
+      {/* Drop shadow for depth */}
+      <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+        <feDropShadow dx="0.1" dy="0.1" stdDeviation="0.5" floodColor="#000" floodOpacity="0.5" />
+      </filter>
+    </defs>
+  )
+}
+
+// ============================================
 // Ellipse Helper
 // ============================================
 interface CircleAsEllipseProps {
@@ -139,6 +171,26 @@ function CircleAsEllipse({
       onContextMenu={onContextMenu}
     />
   )
+}
+
+// ============================================
+// Helper: Darken a hex color
+// ============================================
+function darkenColor(hex: string, factor: number = 0.4): string {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgb(${Math.round(r * factor)}, ${Math.round(g * factor)}, ${Math.round(b * factor)})`
+}
+
+// ============================================
+// Helper: Lighten a hex color
+// ============================================
+function lightenColor(hex: string, factor: number = 0.3): string {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgb(${Math.min(255, Math.round(r + (255 - r) * factor))}, ${Math.min(255, Math.round(g + (255 - g) * factor))}, ${Math.min(255, Math.round(b + (255 - b) * factor))})`
 }
 
 // ============================================
@@ -209,20 +261,61 @@ function PolygonShape({
   const VERTEX_R = 1.2, VERTEX_HOVER_R = 1.5, VERTEX_TOUCH_R = 3.5
   const MID_R = 0.8, MID_TOUCH_R = 2.0
   
-  // Selected state: brighten stroke, increase opacity
+  // Style calculations
   const fillOpacity = isSelected ? Math.min(style.fillOpacity * 2, 0.4) : style.fillOpacity
-  const strokeColor = isSelected ? '#f59e0b' : style.strokeColor
-  const strokeWidth = isSelected ? Math.max(style.strokeWidth * 1.5, 0.5) : style.strokeWidth
+  const mainStrokeColor = isSelected ? '#f59e0b' : style.strokeColor
+  const shadowStrokeColor = isSelected ? darkenColor('#f59e0b', 0.3) : darkenColor(style.strokeColor, 0.3)
+  const highlightStrokeColor = isSelected ? lightenColor('#f59e0b', 0.4) : lightenColor(style.strokeColor, 0.4)
+  
+  // Stroke widths - shadow is thicker, main stroke on top
+  const shadowWidth = style.strokeWidth * 2.5
+  const mainWidth = style.strokeWidth * 1.2
+  const highlightWidth = style.strokeWidth * 0.6
   
   return (
     <g ref={svgRef}>
-      {/* Polygon fill and stroke - NO click handler, selection via sidebar only */}
+      {/* Layer 1: Shadow/glow stroke - darker, blurred, underneath */}
+      <polygon
+        points={pointsStr}
+        fill="none"
+        stroke={shadowStrokeColor}
+        strokeWidth={shadowWidth}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        strokeOpacity={0.6}
+        filter={isSelected ? "url(#glow-selected)" : "url(#glow)"}
+        style={{ pointerEvents: 'none' }}
+      />
+      
+      {/* Layer 2: Main fill */}
       <polygon
         points={pointsStr}
         fill={style.fillColor}
         fillOpacity={fillOpacity}
-        stroke={strokeColor}
-        strokeWidth={strokeWidth}
+        stroke="none"
+        style={{ pointerEvents: 'none' }}
+      />
+      
+      {/* Layer 3: Main stroke - rounded corners */}
+      <polygon
+        points={pointsStr}
+        fill="none"
+        stroke={mainStrokeColor}
+        strokeWidth={mainWidth}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        style={{ pointerEvents: 'none' }}
+      />
+      
+      {/* Layer 4: Inner highlight stroke - subtle lighter edge */}
+      <polygon
+        points={pointsStr}
+        fill="none"
+        stroke={highlightStrokeColor}
+        strokeWidth={highlightWidth}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        strokeOpacity={0.4}
         style={{ pointerEvents: 'none' }}
       />
       
@@ -282,7 +375,7 @@ function DrawingPolygon({ points, mousePos, style, aspectRatio }: {
   return (
     <g>
       <polyline points={pointsStr} fill="none" stroke="#f59e0b"
-        strokeWidth={0.5} strokeDasharray="1.5,0.75" />
+        strokeWidth={0.5} strokeDasharray="1.5,0.75" strokeLinejoin="round" />
       
       {points.length >= 2 && mousePos && (
         <line x1={mousePos.x} y1={mousePos.y} x2={points[0].x} y2={points[0].y}
@@ -402,6 +495,9 @@ function HotspotSvgOverlay({
       onMouseMove={(e) => onMouseMove(getMousePosition(e))}
       onContextMenu={(e) => e.preventDefault()}
     >
+      {/* SVG Filter definitions */}
+      <SvgFilters />
+      
       {/* Render all polygons - NO click selection, sidebar only */}
       {hotspots.map(hotspot => {
         if (hotspot.shape !== 'polygon') return null
@@ -454,7 +550,9 @@ function StyleEditor({ style, onChange, saving }: StyleEditorProps) {
             className="absolute inset-1 rounded-sm"
             style={{ 
               border: `2px solid ${style.strokeColor}`,
-              opacity: 0.8
+              borderRadius: '4px',
+              boxShadow: `0 0 4px ${darkenColor(style.strokeColor, 0.5)}`,
+              opacity: 0.9
             }} 
           />
         </div>
