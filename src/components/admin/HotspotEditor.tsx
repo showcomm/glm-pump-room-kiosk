@@ -1,13 +1,10 @@
 /**
  * Hotspot Editor - Polygon Drawing Tool
  * 
- * CRITICAL: PlayCanvas Application must be COMPLETELY ISOLATED from React state.
- * The SplatScene component is memoized and has NO props that change.
- * 
- * ASPECT RATIO: Reads from config's target_width/height so hotspot coordinates
- * match between admin editor and deployed kiosk regardless of browser size.
- * 
- * FIX: Don't render PlayCanvas until container has non-zero dimensions.
+ * CRITICAL: Follows the same pattern as CameraCapture.tsx and InteractiveViewer.tsx
+ * - Application renders immediately with module-level constants
+ * - NO conditional rendering, NO AspectRatioContainer wrapper
+ * - Static camera (no orbit controls - visitors can't move camera)
  */
 
 import React, { useState, useEffect, useRef, memo } from 'react'
@@ -18,24 +15,13 @@ import { useSplat } from '@playcanvas/react/hooks'
 import { useSplatData } from '../../hooks/useSplatData'
 import type { ParsedSplatHotspot, PolygonBounds, SplatConfig } from '../../lib/database.types'
 import { createHotspot, deleteHotspot } from '../../lib/api/splat'
+import { getOverviewViewpoint } from '../../data/viewpoints'
 
 // ============================================
-// CONFIGURATION
+// CONFIGURATION - Module level constants
 // ============================================
 const SPLAT_URL = '/pump-room.ply'
-
-// STATIC camera values - NEVER passed as props to avoid re-renders
-const OVERVIEW = {
-  position: [-0.005, -6.86, 0.296] as [number, number, number],
-  rotation: [87.53, -0.96, 0] as [number, number, number],
-  fov: 60
-}
-
-// Fallback resolution if config not loaded
-const DEFAULT_RESOLUTION = {
-  width: 1920,
-  height: 1080
-}
+const INITIAL = getOverviewViewpoint()
 
 // Default polygon styling
 const DEFAULT_STYLE = {
@@ -56,79 +42,7 @@ interface Point {
 type EditorMode = 'select' | 'draw'
 
 // ============================================
-// Aspect Ratio Container
-// Maintains exact kiosk aspect ratio with letterboxing
-// Returns ready=true only when dimensions are computed
-// ============================================
-function AspectRatioContainer({ 
-  width,
-  height,
-  children 
-}: { 
-  width: number
-  height: number
-  children: (ready: boolean, containerDims: { width: number; height: number }) => React.ReactNode 
-}) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
-  const aspectRatio = width / height
-  
-  useEffect(() => {
-    const updateDimensions = () => {
-      if (!containerRef.current) return
-      
-      const parent = containerRef.current.parentElement
-      if (!parent) return
-      
-      const parentWidth = parent.clientWidth
-      const parentHeight = parent.clientHeight
-      const parentRatio = parentWidth / parentHeight
-      
-      let w: number, h: number
-      
-      if (parentRatio > aspectRatio) {
-        h = parentHeight
-        w = h * aspectRatio
-      } else {
-        w = parentWidth
-        h = w / aspectRatio
-      }
-      
-      setDimensions({ width: w, height: h })
-    }
-    
-    updateDimensions()
-    
-    const resizeObserver = new ResizeObserver(updateDimensions)
-    if (containerRef.current?.parentElement) {
-      resizeObserver.observe(containerRef.current.parentElement)
-    }
-    
-    return () => resizeObserver.disconnect()
-  }, [aspectRatio])
-  
-  const ready = dimensions.width > 0 && dimensions.height > 0
-  
-  return (
-    <div 
-      ref={containerRef}
-      className="absolute inset-0 flex items-center justify-center"
-    >
-      <div 
-        style={{ 
-          width: dimensions.width || '100%', 
-          height: dimensions.height || '100%',
-          position: 'relative'
-        }}
-      >
-        {children(ready, dimensions)}
-      </div>
-    </div>
-  )
-}
-
-// ============================================
-// Splat Components - COMPLETELY STATIC
+// Splat Component
 // ============================================
 function PumpRoomSplat({ src }: { src: string }) {
   const { asset, loading, error } = useSplat(src)
@@ -140,17 +54,20 @@ function PumpRoomSplat({ src }: { src: string }) {
   )
 }
 
-// CRITICAL: NO PROPS - uses module-level constants only
-const SplatScene = memo(function SplatScene() {
+// ============================================
+// Splat Viewer - renders immediately, no props
+// Static camera (no orbit controls) to match visitor experience
+// ============================================
+function SplatViewer() {
   return (
     <Application graphicsDeviceOptions={{ antialias: false }}>
-      <Entity name="camera" position={OVERVIEW.position} rotation={OVERVIEW.rotation}>
-        <Camera clearColor="#1a1a2e" fov={OVERVIEW.fov} farClip={1000} nearClip={0.01} />
+      <Entity name="camera" position={INITIAL.position} rotation={INITIAL.rotation}>
+        <Camera clearColor="#1a1a2e" fov={INITIAL.fov || 60} farClip={1000} nearClip={0.01} />
       </Entity>
       <PumpRoomSplat src={SPLAT_URL} />
     </Application>
   )
-})
+}
 
 // ============================================
 // Polygon Shape Renderer
@@ -425,7 +342,6 @@ function Overlay({
       }
       onAddDrawingPoint(pos)
     }
-    // Select mode: clicking empty area does NOT deselect - use sidebar
   }
   
   const handleDoubleClick = () => {
@@ -602,11 +518,6 @@ function Sidebar({
   
   const selectedHotspot = hotspots.find(h => h.id === selectedId)
   
-  // Format resolution display
-  const targetWidth = config?.target_width || DEFAULT_RESOLUTION.width
-  const targetHeight = config?.target_height || DEFAULT_RESOLUTION.height
-  const resolutionLabel = `${targetWidth}×${targetHeight}`
-  
   const handleCreate = () => {
     if (newName.trim()) {
       onCreateHotspot(newName.trim())
@@ -623,10 +534,7 @@ function Sidebar({
         </Link>
         <h1 className="text-sm font-medium text-neutral-200 mt-0.5">Hotspot Editor</h1>
         <p className="text-[9px] text-neutral-600 mt-0.5">
-          {resolutionLabel} locked
-          <Link to="/admin/display-settings" className="ml-2 text-amber-700 hover:text-amber-600">
-            Change
-          </Link>
+          Static view matches visitor kiosk
         </p>
       </div>
       
@@ -774,10 +682,6 @@ export default function HotspotEditor() {
     setLocalHotspots(hotspots)
   }, [hotspots])
   
-  // Get resolution from config or use defaults
-  const targetWidth = config?.target_width || DEFAULT_RESOLUTION.width
-  const targetHeight = config?.target_height || DEFAULT_RESOLUTION.height
-  
   const handleSelectHotspot = (id: string | null) => {
     setSelectedId(id)
     if (id) setMode('select')
@@ -843,34 +747,22 @@ export default function HotspotEditor() {
   
   return (
     <div className="w-screen h-screen bg-black flex">
-      {/* Viewer area with fixed aspect ratio from config */}
+      {/* Viewer area - NO conditional rendering */}
       <div className="flex-1 relative bg-neutral-950">
-        <AspectRatioContainer width={targetWidth} height={targetHeight}>
-          {(ready, dims) => (
-            <>
-              {/* Only render PlayCanvas when container has proper dimensions */}
-              {ready && <SplatScene />}
-              {!ready && (
-                <div className="absolute inset-0 flex items-center justify-center text-neutral-600 text-sm">
-                  Initializing...
-                </div>
-              )}
-              <Overlay
-                hotspots={localHotspots.filter(h => h.shape === 'polygon')}
-                selectedId={selectedId}
-                onSelectHotspot={handleSelectHotspot}
-                onUpdateBounds={handleUpdateBounds}
-                mode={mode}
-                drawingPoints={drawingPoints}
-                onAddDrawingPoint={(p) => setDrawingPoints(prev => [...prev, p])}
-                onCompleteDrawing={() => {}}
-                mousePos={mousePos}
-                onMouseMove={setMousePos}
-                style={style}
-              />
-            </>
-          )}
-        </AspectRatioContainer>
+        <SplatViewer />
+        <Overlay
+          hotspots={localHotspots.filter(h => h.shape === 'polygon')}
+          selectedId={selectedId}
+          onSelectHotspot={handleSelectHotspot}
+          onUpdateBounds={handleUpdateBounds}
+          mode={mode}
+          drawingPoints={drawingPoints}
+          onAddDrawingPoint={(p) => setDrawingPoints(prev => [...prev, p])}
+          onCompleteDrawing={() => {}}
+          mousePos={mousePos}
+          onMouseMove={setMousePos}
+          style={style}
+        />
       </div>
       
       <Sidebar
