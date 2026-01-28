@@ -22,13 +22,17 @@ import { createHotspot, deleteHotspot } from '../../lib/api/splat'
 // ============================================
 const SPLAT_URL = '/pump-room.ply'
 
-// Fallback values if config not loaded
-const DEFAULT_CONFIG = {
-  target_width: 1920,
-  target_height: 1080,
-  overview_position: [-0.005, -6.86, 0.296] as [number, number, number],
-  overview_rotation: [87.53, -0.96, 0] as [number, number, number],
-  overview_fov: 60
+// STATIC camera values - NEVER passed as props to avoid re-renders
+const OVERVIEW = {
+  position: [-0.005, -6.86, 0.296] as [number, number, number],
+  rotation: [87.53, -0.96, 0] as [number, number, number],
+  fov: 60
+}
+
+// Fallback resolution if config not loaded
+const DEFAULT_RESOLUTION = {
+  width: 1920,
+  height: 1080
 }
 
 // Default polygon styling
@@ -119,7 +123,7 @@ function AspectRatioContainer({
 }
 
 // ============================================
-// Splat Components
+// Splat Components - COMPLETELY STATIC
 // ============================================
 function PumpRoomSplat({ src }: { src: string }) {
   const { asset, loading, error } = useSplat(src)
@@ -131,17 +135,12 @@ function PumpRoomSplat({ src }: { src: string }) {
   )
 }
 
-interface SplatSceneProps {
-  position: [number, number, number]
-  rotation: [number, number, number]
-  fov: number
-}
-
-const SplatScene = memo(function SplatScene({ position, rotation, fov }: SplatSceneProps) {
+// CRITICAL: NO PROPS - uses module-level constants only
+const SplatScene = memo(function SplatScene() {
   return (
     <Application graphicsDeviceOptions={{ antialias: false }}>
-      <Entity name="camera" position={position} rotation={rotation}>
-        <Camera clearColor="#1a1a2e" fov={fov} farClip={1000} nearClip={0.01} />
+      <Entity name="camera" position={OVERVIEW.position} rotation={OVERVIEW.rotation}>
+        <Camera clearColor="#1a1a2e" fov={OVERVIEW.fov} farClip={1000} nearClip={0.01} />
       </Entity>
       <PumpRoomSplat src={SPLAT_URL} />
     </Application>
@@ -599,8 +598,8 @@ function Sidebar({
   const selectedHotspot = hotspots.find(h => h.id === selectedId)
   
   // Format resolution display
-  const targetWidth = config?.target_width || DEFAULT_CONFIG.target_width
-  const targetHeight = config?.target_height || DEFAULT_CONFIG.target_height
+  const targetWidth = config?.target_width || DEFAULT_RESOLUTION.width
+  const targetHeight = config?.target_height || DEFAULT_RESOLUTION.height
   const resolutionLabel = `${targetWidth}×${targetHeight}`
   
   const handleCreate = () => {
@@ -770,12 +769,9 @@ export default function HotspotEditor() {
     setLocalHotspots(hotspots)
   }, [hotspots])
   
-  // Get config values or defaults
-  const targetWidth = config?.target_width || DEFAULT_CONFIG.target_width
-  const targetHeight = config?.target_height || DEFAULT_CONFIG.target_height
-  const overviewPosition = (config?.overview_position as [number, number, number]) || DEFAULT_CONFIG.overview_position
-  const overviewRotation = (config?.overview_rotation as [number, number, number]) || DEFAULT_CONFIG.overview_rotation
-  const overviewFov = config?.overview_fov || DEFAULT_CONFIG.overview_fov
+  // Get resolution from config or use defaults
+  const targetWidth = config?.target_width || DEFAULT_RESOLUTION.width
+  const targetHeight = config?.target_height || DEFAULT_RESOLUTION.height
   
   const handleSelectHotspot = (id: string | null) => {
     setSelectedId(id)
@@ -845,11 +841,7 @@ export default function HotspotEditor() {
       {/* Viewer area with fixed aspect ratio from config */}
       <div className="flex-1 relative bg-neutral-950">
         <AspectRatioContainer width={targetWidth} height={targetHeight}>
-          <SplatScene 
-            position={overviewPosition}
-            rotation={overviewRotation}
-            fov={overviewFov}
-          />
+          <SplatScene />
           <Overlay
             hotspots={localHotspots.filter(h => h.shape === 'polygon')}
             selectedId={selectedId}
