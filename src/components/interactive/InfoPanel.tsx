@@ -23,13 +23,13 @@ interface InfoPanelProps {
 
 export function InfoPanel({ frameWidth, viewportBounds }: InfoPanelProps) {
   const { 
-    selectedEquipment, 
+    selectedHotspot, 
     language,
     navigateToOverview,
     isTransitioning
   } = useKioskStore()
   
-  const isVisible = selectedEquipment && !isTransitioning
+  const isVisible = selectedHotspot && !isTransitioning
   
   const getCategoryColor = (category: string) => {
     switch (category) {
@@ -67,60 +67,64 @@ export function InfoPanel({ frameWidth, viewportBounds }: InfoPanelProps) {
         width: 'min(400px, 35vw)',
       }}
     >
-      {selectedEquipment && (
+      {selectedHotspot && (
         <div className="h-full bg-museum-dark/95 backdrop-blur-sm rounded-lg border border-museum-accent/30 flex flex-col overflow-hidden">
           {/* Header with category color bar */}
-          <div className={`${getCategoryColor(selectedEquipment.color_category)} h-1`} />
+          <div className={`${getCategoryColor(selectedHotspot.category || 'default')} h-1`} />
           
           <div className="p-6 flex-1 overflow-y-auto">
             {/* Equipment name */}
             <h2 className="font-display text-kiosk-xl text-museum-stone mb-4">
-              {selectedEquipment.name[language]}
+              {language === 'en' ? selectedHotspot.name_en : (selectedHotspot.name_fr || selectedHotspot.name_en)}
             </h2>
             
             {/* Year installed */}
-            {selectedEquipment.year_installed && (
+            {selectedHotspot.year_installed && (
               <div className="text-museum-highlight text-kiosk-sm mb-4">
-                {language === 'en' ? 'Installed' : 'Installé'}: {selectedEquipment.year_installed}
+                {language === 'en' ? 'Installed' : 'Installé'}: {selectedHotspot.year_installed}
               </div>
             )}
             
             {/* Description */}
-            <div className="mb-6">
-              <h3 className="text-museum-accent text-kiosk-base font-semibold mb-2">
-                {language === 'en' ? 'Description' : 'Description'}
-              </h3>
-              <p className="text-museum-warm text-kiosk-base leading-relaxed">
-                {selectedEquipment.description[language]}
-              </p>
-            </div>
+            {(selectedHotspot.description_en || selectedHotspot.description_fr) && (
+              <div className="mb-6">
+                <h3 className="text-museum-accent text-kiosk-base font-semibold mb-2">
+                  {language === 'en' ? 'Description' : 'Description'}
+                </h3>
+                <p className="text-museum-warm text-kiosk-base leading-relaxed">
+                  {language === 'en' ? selectedHotspot.description_en : (selectedHotspot.description_fr || selectedHotspot.description_en)}
+                </p>
+              </div>
+            )}
             
             {/* Function */}
-            <div className="mb-6">
-              <h3 className="text-museum-accent text-kiosk-base font-semibold mb-2">
-                {language === 'en' ? 'Function' : 'Fonction'}
-              </h3>
-              <p className="text-museum-warm text-kiosk-base leading-relaxed">
-                {selectedEquipment.function[language]}
-              </p>
-            </div>
+            {(selectedHotspot.function_en || selectedHotspot.function_fr) && (
+              <div className="mb-6">
+                <h3 className="text-museum-accent text-kiosk-base font-semibold mb-2">
+                  {language === 'en' ? 'Function' : 'Fonction'}
+                </h3>
+                <p className="text-museum-warm text-kiosk-base leading-relaxed">
+                  {language === 'en' ? selectedHotspot.function_en : (selectedHotspot.function_fr || selectedHotspot.function_en)}
+                </p>
+              </div>
+            )}
             
             {/* Specifications */}
-            {selectedEquipment.specifications && (
+            {(selectedHotspot.specifications_en || selectedHotspot.specifications_fr) && (
               <div className="mb-6">
                 <h3 className="text-museum-accent text-kiosk-base font-semibold mb-2">
                   {language === 'en' ? 'Specifications' : 'Spécifications'}
                 </h3>
                 <p className="text-museum-warm/80 text-kiosk-sm font-mono leading-relaxed">
-                  {selectedEquipment.specifications[language]}
+                  {language === 'en' ? selectedHotspot.specifications_en : (selectedHotspot.specifications_fr || selectedHotspot.specifications_en)}
                 </p>
               </div>
             )}
             
             {/* Manufacturer */}
-            {selectedEquipment.manufacturer && (
+            {selectedHotspot.manufacturer && (
               <div className="text-museum-warm/60 text-kiosk-sm">
-                {language === 'en' ? 'Manufacturer' : 'Fabricant'}: {selectedEquipment.manufacturer}
+                {language === 'en' ? 'Manufacturer' : 'Fabricant'}: {selectedHotspot.manufacturer}
               </div>
             )}
           </div>
