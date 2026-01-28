@@ -15,7 +15,7 @@ import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat, Script } from '@playcanvas/react/components'
 import { useSplat, useApp } from '@playcanvas/react/hooks'
 import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs'
-import { equipment } from '../../data/equipment'
+import { useSplatData } from '../../hooks/useSplatData'
 import { getOverviewViewpoint } from '../../data/viewpoints'
 
 // ============================================
@@ -262,13 +262,15 @@ function TransformRow({ label, values, onChange, step = 0.1, decimals = 2 }: Tra
 // Sidebar
 // ============================================
 function Sidebar() {
+  const { hotspots, loading, error, saveHotspotViewpoint } = useSplatData()
+  
   const [position, setPosition] = useState<[number, number, number]>([...INITIAL.position])
   const [rotation, setRotation] = useState<[number, number, number]>([...INITIAL.rotation])
   const [fov, setFov] = useState<number>(INITIAL.fov || 60)
-  const [selectedEquipment, setSelectedEquipment] = useState<string | null>(null)
-  const [savedViewpoints, setSavedViewpoints] = useState<Record<string, any>>({})
-  const [copyFeedback, setCopyFeedback] = useState<string | null>(null)
+  const [selectedHotspotId, setSelectedHotspotId] = useState<string | null>(null)
+  const [saveFeedback, setSaveFeedback] = useState<string | null>(null)
   const [orbitEnabled, setOrbitEnabled] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
   
   // Listen for camera position updates from the 3D viewer
   useEffect(() => {
@@ -332,57 +334,64 @@ function Sidebar() {
   }
   
   const handleLoadViewpoint = (id: string) => {
-    const vp = savedViewpoints[id]
-    if (vp) {
-      currentPosition = [...vp.position]
-      currentRotation = [...vp.rotation]
-      currentFov = vp.fov || 60
-      setPosition([...vp.position])
-      setRotation([...vp.rotation])
-      setFov(vp.fov || 60)
-      updateCamera(vp.position, vp.rotation, vp.fov || 60)
-      setSelectedEquipment(id)
+    const hotspot = hotspots?.find(h => h.id === id)
+    if (hotspot && hotspot.viewpoint_position && hotspot.viewpoint_rotation) {
+      const pos: [number, number, number] = [
+        Number(hotspot.viewpoint_position[0]),
+        Number(hotspot.viewpoint_position[1]),
+        Number(hotspot.viewpoint_position[2])
+      ]
+      const rot: [number, number, number] = [
+        Number(hotspot.viewpoint_rotation[0]),
+        Number(hotspot.viewpoint_rotation[1]),
+        Number(hotspot.viewpoint_rotation[2])
+      ]
+      const f = Number(hotspot.viewpoint_fov || 60)
+      
+      currentPosition = pos
+      currentRotation = rot
+      currentFov = f
+      setPosition(pos)
+      setRotation(rot)
+      setFov(f)
+      updateCamera(pos, rot, f)
+      setSelectedHotspotId(id)
     }
   }
   
-  const generateCode = (equipmentId: string, pos: number[], rot: number[], f: number) => {
-    const item = equipment.find(e => e.id === equipmentId)
-    return `{
-  id: '${equipmentId}-view',
-  equipment_id: '${equipmentId}',
-  position: [${pos.map(v => v.toFixed(3)).join(', ')}],
-  rotation: [${rot.map(v => v.toFixed(2)).join(', ')}],
-  fov: ${f.toFixed(0)},
-  label: { en: '${item?.name.en || ''}', fr: '${item?.name.fr || ''}' }
-},`
-  }
-  
-  const handleSave = () => {
-    if (!selectedEquipment) return
+  const handleSave = async () => {
+    if (!selectedHotspotId) return
     
-    const viewpoint = {
-      equipment_id: selectedEquipment,
-      position: [...position],
-      rotation: [...rotation],
-      fov: fov,
+    setIsSaving(true)
+    setSaveFeedback('Saving...')
+    
+    const success = await saveHotspotViewpoint(
+      selectedHotspotId,
+      position,
+      rotation,
+      fov
+    )
+    
+    if (success) {
+      setSaveFeedback('✓ Saved to database!')
+      setTimeout(() => setSaveFeedback(null), 2000)
+    } else {
+      setSaveFeedback('✗ Save failed')
+      setTimeout(() => setSaveFeedback(null), 2000)
     }
     
-    setSavedViewpoints(prev => ({ ...prev, [selectedEquipment]: viewpoint }))
-    
-    const code = generateCode(selectedEquipment, position, rotation, fov)
-    navigator.clipboard.writeText(code)
-    setCopyFeedback('Copied!')
-    setTimeout(() => setCopyFeedback(null), 1500)
+    setIsSaving(false)
   }
   
-  const handleCopyAll = () => {
-    const allCode = Object.values(savedViewpoints)
-      .map(vp => generateCode(vp.equipment_id, vp.position, vp.rotation, vp.fov || 60))
-      .join('\n')
-    navigator.clipboard.writeText(allCode)
-    setCopyFeedback('All copied!')
-    setTimeout(() => setCopyFeedback(null), 1500)
-  }
+  // Get hotspots with viewpoints (has position set)
+  const hotspotsWithViewpoints = hotspots?.filter(h => 
+    h.viewpoint_position && h.viewpoint_position.length === 3
+  ) || []
+  
+  // Get hotspots without viewpoints
+  const hotspotsWithoutViewpoints = hotspots?.filter(h => 
+    !h.viewpoint_position || h.viewpoint_position.length !== 3
+  ) || []
   
   return (
     <div className="w-96 bg-neutral-900 text-white text-sm flex flex-col">
@@ -393,6 +402,18 @@ function Sidebar() {
         </Link>
         <h1 className="text-base font-medium text-neutral-200 mt-1">Camera Viewpoints</h1>
       </div>
+      
+      {loading && (
+        <div className="p-3 bg-neutral-800 text-neutral-400 text-xs">
+          Loading hotspots from database...
+        </div>
+      )}
+      
+      {error && (
+        <div className="p-3 bg-red-900/30 text-red-400 text-xs">
+          Error: {error}
+        </div>
+      )}
       
       {/* Transform */}
       <div className="p-3 border-b border-neutral-700">
@@ -428,74 +449,106 @@ function Sidebar() {
         </div>
       </div>
       
-      {/* Equipment Selection */}
+      {/* Hotspot Selection */}
       <div className="p-3 border-b border-neutral-700">
-        <label className="text-xs text-neutral-400 block mb-1">Equipment</label>
+        <label className="text-xs text-neutral-400 block mb-1">Select Hotspot</label>
         <select
-          value={selectedEquipment || ''}
-          onChange={(e) => setSelectedEquipment(e.target.value || null)}
+          value={selectedHotspotId || ''}
+          onChange={(e) => setSelectedHotspotId(e.target.value || null)}
           className="w-full bg-neutral-800 border border-neutral-600 rounded px-2 py-1.5 text-xs"
+          disabled={loading}
         >
-          <option value="">Select equipment...</option>
-          {equipment.map(e => (
-            <option key={e.id} value={e.id}>
-              {e.name.en} {savedViewpoints[e.id] ? '✓' : ''}
-            </option>
-          ))}
+          <option value="">Select hotspot...</option>
+          {hotspotsWithViewpoints.length > 0 && (
+            <optgroup label="Has Viewpoint">
+              {hotspotsWithViewpoints.map(h => (
+                <option key={h.id} value={h.id}>
+                  ✓ {h.name_en}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {hotspotsWithoutViewpoints.length > 0 && (
+            <optgroup label="No Viewpoint Yet">
+              {hotspotsWithoutViewpoints.map(h => (
+                <option key={h.id} value={h.id}>
+                  {h.name_en}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
         
         <button
           onClick={handleSave}
-          disabled={!selectedEquipment}
+          disabled={!selectedHotspotId || isSaving}
           className="w-full mt-2 bg-amber-800 hover:bg-amber-700 disabled:bg-neutral-700 
                      disabled:text-neutral-500 py-1.5 rounded text-xs font-medium transition-colors"
         >
-          {copyFeedback || 'Save & Copy Code'}
+          {saveFeedback || 'Save Viewpoint to Database'}
         </button>
+        
+        <p className="text-[10px] text-neutral-600 mt-2">
+          Position the camera, select a hotspot, and click Save to store the viewpoint.
+        </p>
       </div>
       
-      {/* Saved Viewpoints */}
+      {/* Saved Viewpoints List */}
       <div className="flex-1 overflow-y-auto p-3">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs text-neutral-400">
-            Saved ({Object.keys(savedViewpoints).length})
+            Hotspots with Viewpoints ({hotspotsWithViewpoints.length})
           </span>
-          {Object.keys(savedViewpoints).length > 0 && (
-            <button onClick={handleCopyAll} className="text-xs text-amber-600 hover:text-amber-500">
-              Copy All
-            </button>
-          )}
         </div>
         
         <div className="space-y-1">
-          {Object.entries(savedViewpoints).map(([id, vp]) => (
+          {hotspotsWithViewpoints.map((h) => (
             <button
-              key={id}
-              onClick={() => handleLoadViewpoint(id)}
+              key={h.id}
+              onClick={() => handleLoadViewpoint(h.id)}
               className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors
-                ${selectedEquipment === id 
+                ${selectedHotspotId === h.id 
                   ? 'bg-amber-900/50 border border-amber-700' 
                   : 'bg-neutral-800 border border-neutral-700 hover:border-neutral-600'}`}
             >
-              <div className="text-neutral-200">{equipment.find(e => e.id === id)?.name.en}</div>
+              <div className="text-neutral-200">{h.name_en}</div>
               <div className="text-neutral-500 font-mono text-[10px]">
-                pos: [{vp.position.map((v: number) => v.toFixed(1)).join(', ')}] • fov: {vp.fov || 60}
+                pos: [{h.viewpoint_position?.map((v: unknown) => Number(v).toFixed(1)).join(', ')}] • fov: {h.viewpoint_fov || 60}
               </div>
               <div className="text-neutral-500 font-mono text-[10px]">
-                rot: [{vp.rotation.map((v: number) => v.toFixed(1)).join(', ')}]
+                rot: [{h.viewpoint_rotation?.map((v: unknown) => Number(v).toFixed(1)).join(', ')}]
               </div>
             </button>
           ))}
         </div>
         
-        {Object.keys(savedViewpoints).length === 0 && (
-          <p className="text-neutral-600 text-xs text-center py-4">No viewpoints saved</p>
+        {hotspotsWithViewpoints.length === 0 && !loading && (
+          <p className="text-neutral-600 text-xs text-center py-4">
+            No viewpoints saved yet. Select a hotspot above and save a viewpoint.
+          </p>
+        )}
+        
+        {hotspotsWithoutViewpoints.length > 0 && (
+          <>
+            <div className="mt-4 mb-2">
+              <span className="text-xs text-neutral-600">
+                Hotspots without Viewpoints ({hotspotsWithoutViewpoints.length})
+              </span>
+            </div>
+            <div className="space-y-0.5">
+              {hotspotsWithoutViewpoints.map((h) => (
+                <div key={h.id} className="text-neutral-600 text-[10px] px-2 py-1">
+                  {h.name_en}
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
       
       {/* Footer */}
       <div className="p-3 border-t border-neutral-700 text-[10px] text-neutral-600">
-        Code copies to clipboard → paste into <code className="text-neutral-500">viewpoints.ts</code>
+        Viewpoints saved to <code className="text-neutral-500">splat_hotspots</code> table
       </div>
     </div>
   )
