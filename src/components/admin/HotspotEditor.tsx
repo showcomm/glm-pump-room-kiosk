@@ -363,6 +363,7 @@ function PolygonShape({
 
 // ============================================
 // Drawing Polygon
+// IMPORTANT: All elements have pointerEvents="none" so clicks pass through to SVG
 // ============================================
 function DrawingPolygon({ points, mousePos, style, aspectRatio }: { 
   points: Point[]; mousePos: Point | null; style: HotspotStyle; aspectRatio: number
@@ -373,7 +374,7 @@ function DrawingPolygon({ points, mousePos, style, aspectRatio }: {
   const pointsStr = allPoints.map(p => `${p.x},${p.y}`).join(' ')
   
   return (
-    <g>
+    <g style={{ pointerEvents: 'none' }}>
       <polyline points={pointsStr} fill="none" stroke="#f59e0b"
         strokeWidth={0.5} strokeDasharray="1.5,0.75" strokeLinejoin="round" />
       
@@ -385,13 +386,13 @@ function DrawingPolygon({ points, mousePos, style, aspectRatio }: {
       {points.map((p, i) => (
         <CircleAsEllipse key={i} cx={p.x} cy={p.y} r={i === 0 && points.length >= 3 ? 1.8 : 1.2}
           aspectRatio={aspectRatio} fill={i === 0 ? '#22c55e' : '#f59e0b'}
-          stroke="rgba(0,0,0,0.4)" strokeWidth={0.15} />
+          stroke="rgba(0,0,0,0.4)" strokeWidth={0.15} pointerEvents="none" />
       ))}
       
-      {/* Close zone indicator */}
+      {/* Close zone indicator - clicks pass through to SVG handler */}
       {points.length >= 3 && (
         <CircleAsEllipse cx={points[0].x} cy={points[0].y} r={4.0}
-          aspectRatio={aspectRatio} fill="rgba(34, 197, 94, 0.15)" stroke="#22c55e" strokeWidth={0.2} />
+          aspectRatio={aspectRatio} fill="rgba(34, 197, 94, 0.15)" stroke="#22c55e" strokeWidth={0.2} pointerEvents="none" />
       )}
     </g>
   )
