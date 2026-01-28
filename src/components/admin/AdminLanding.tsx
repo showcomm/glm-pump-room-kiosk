@@ -42,6 +42,19 @@ export default function AdminLanding() {
             </p>
           </Link>
 
+          {/* Hotspot Editor - NOW ENABLED */}
+          <Link
+            to="/admin/hotspot-editor"
+            className="bg-museum-brown/30 hover:bg-museum-brown/50 border border-museum-accent/30 rounded-lg p-6 transition-colors"
+          >
+            <h2 className="text-xl font-display text-museum-highlight mb-2">
+              🎯 Hotspot Regions
+            </h2>
+            <p className="text-gray-400 text-sm">
+              Draw polygon regions around equipment. Click to place points, double-click to close shapes.
+            </p>
+          </Link>
+
           {/* Equipment Management - placeholder */}
           <div className="bg-museum-brown/20 border border-museum-accent/20 rounded-lg p-6 opacity-50">
             <h2 className="text-xl font-display text-museum-highlight mb-2">
@@ -49,17 +62,6 @@ export default function AdminLanding() {
             </h2>
             <p className="text-gray-400 text-sm">
               Edit equipment descriptions, specifications, and translations.
-            </p>
-            <span className="text-xs text-gray-500 mt-2 block">Coming soon</span>
-          </div>
-
-          {/* Hotspot Editor - placeholder */}
-          <div className="bg-museum-brown/20 border border-museum-accent/20 rounded-lg p-6 opacity-50">
-            <h2 className="text-xl font-display text-museum-highlight mb-2">
-              🎯 Hotspot Regions
-            </h2>
-            <p className="text-gray-400 text-sm">
-              Define touchable regions and link them to equipment viewpoints.
             </p>
             <span className="text-xs text-gray-500 mt-2 block">Coming soon</span>
           </div>
