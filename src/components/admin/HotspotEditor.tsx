@@ -1,13 +1,13 @@
 /**
  * Hotspot Editor - Polygon Drawing Tool
  * 
- * CRITICAL: Follows the same pattern as CameraCapture.tsx and InteractiveViewer.tsx
- * - Application renders immediately with module-level constants
- * - NO conditional rendering, NO AspectRatioContainer wrapper
- * - Static camera (no orbit controls - visitors can't move camera)
+ * CRITICAL ARCHITECTURAL PATTERN:
+ * Main component must be STATELESS - just like CameraCapture.
+ * All state lives in the Sidebar/Editor component.
+ * SplatViewer renders independently, unaffected by state changes.
  */
 
-import React, { useState, useEffect, useRef, memo } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat } from '@playcanvas/react/components'
@@ -55,7 +55,7 @@ function PumpRoomSplat({ src }: { src: string }) {
 }
 
 // ============================================
-// Splat Viewer - renders immediately, no props
+// Splat Viewer - STATELESS, renders immediately
 // Static camera (no orbit controls) to match visitor experience
 // ============================================
 function SplatViewer() {
@@ -475,196 +475,9 @@ function StyleEditor({
 }
 
 // ============================================
-// Sidebar
+// Editor Panel - ALL STATE LIVES HERE
 // ============================================
-interface SidebarProps {
-  hotspots: ParsedSplatHotspot[]
-  selectedId: string | null
-  onSelectHotspot: (id: string | null) => void
-  mode: EditorMode
-  onSetMode: (mode: EditorMode) => void
-  onCreateHotspot: (name: string) => void
-  onDeleteHotspot: (id: string) => void
-  drawingPoints: Point[]
-  onCancelDrawing: () => void
-  saving: boolean
-  config: SplatConfig | null
-  loading: boolean
-  error: string | null
-  style: typeof DEFAULT_STYLE
-  onStyleChange: (style: typeof DEFAULT_STYLE) => void
-}
-
-function Sidebar({
-  hotspots,
-  selectedId,
-  onSelectHotspot,
-  mode,
-  onSetMode,
-  onCreateHotspot,
-  onDeleteHotspot,
-  drawingPoints,
-  onCancelDrawing,
-  saving,
-  config,
-  loading,
-  error,
-  style,
-  onStyleChange
-}: SidebarProps) {
-  const [newName, setNewName] = useState('')
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [showStyle, setShowStyle] = useState(false)
-  
-  const selectedHotspot = hotspots.find(h => h.id === selectedId)
-  
-  const handleCreate = () => {
-    if (newName.trim()) {
-      onCreateHotspot(newName.trim())
-      setNewName('')
-    }
-  }
-  
-  return (
-    <div className="w-64 bg-neutral-900 text-white text-sm flex flex-col">
-      {/* Header */}
-      <div className="p-2 border-b border-neutral-700">
-        <Link to="/admin" className="text-amber-600 hover:text-amber-500 text-[10px]">
-          ← Admin
-        </Link>
-        <h1 className="text-sm font-medium text-neutral-200 mt-0.5">Hotspot Editor</h1>
-        <p className="text-[9px] text-neutral-600 mt-0.5">
-          Static view matches visitor kiosk
-        </p>
-      </div>
-      
-      {loading && <div className="p-2 bg-neutral-800 text-neutral-400 text-[10px]">Loading...</div>}
-      {error && <div className="p-2 bg-red-900/30 text-red-400 text-[10px]">{error}</div>}
-      
-      {/* Mode Toggle */}
-      <div className="p-2 border-b border-neutral-700">
-        <div className="flex gap-1">
-          <button
-            onClick={() => onSetMode('select')}
-            className={`flex-1 py-1 rounded text-[11px] ${mode === 'select' ? 'bg-amber-800 text-white' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}
-          >
-            Select
-          </button>
-          <button
-            onClick={() => onSetMode('draw')}
-            className={`flex-1 py-1 rounded text-[11px] ${mode === 'draw' ? 'bg-amber-800 text-white' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}
-          >
-            Draw
-          </button>
-        </div>
-        
-        {mode === 'draw' && (
-          <div className="mt-1.5 text-[10px] text-neutral-500">
-            Click to place. Double-click to close.
-            {drawingPoints.length > 0 && (
-              <span className="ml-2 text-neutral-400">
-                {drawingPoints.length} pts
-                <button onClick={onCancelDrawing} className="ml-2 text-red-400 hover:text-red-300">Cancel</button>
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-      
-      {/* Save new */}
-      {mode === 'draw' && drawingPoints.length >= 3 && (
-        <div className="p-2 border-b border-neutral-700 bg-green-900/20">
-          <input
-            type="text"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="Name..."
-            className="w-full bg-neutral-800 border border-neutral-600 rounded px-2 py-1 text-[11px] focus:border-green-500 focus:outline-none"
-            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-            autoFocus
-          />
-          <button
-            onClick={handleCreate}
-            disabled={!newName.trim()}
-            className="w-full mt-1 bg-green-700 hover:bg-green-600 disabled:bg-neutral-700 disabled:text-neutral-500 py-1 rounded text-[11px]"
-          >
-            Save
-          </button>
-        </div>
-      )}
-      
-      {/* Selected */}
-      {mode === 'select' && selectedHotspot && (
-        <div className="p-2 border-b border-neutral-700 bg-amber-900/10">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-amber-400">{selectedHotspot.name_en}</span>
-            <span className="text-[9px] text-neutral-600">
-              {(selectedHotspot.bounds as PolygonBounds).points.length} pts
-            </span>
-          </div>
-          <p className="text-[9px] text-neutral-600 mt-1">Drag • Click edge to add • Right-click to delete</p>
-          
-          {confirmDelete === selectedHotspot.id ? (
-            <div className="flex gap-1 mt-1.5">
-              <button onClick={() => { onDeleteHotspot(selectedHotspot.id); setConfirmDelete(null) }} className="flex-1 bg-red-700 py-0.5 rounded text-[10px]">Delete</button>
-              <button onClick={() => setConfirmDelete(null)} className="flex-1 bg-neutral-700 py-0.5 rounded text-[10px]">Cancel</button>
-            </div>
-          ) : (
-            <div className="flex gap-2 mt-1.5 text-[10px]">
-              <button onClick={() => setConfirmDelete(selectedHotspot.id)} className="text-red-400 hover:text-red-300">Delete</button>
-              <button onClick={() => onSelectHotspot(null)} className="text-neutral-500 hover:text-neutral-400">Deselect</button>
-            </div>
-          )}
-        </div>
-      )}
-      
-      {/* Style */}
-      <div className="p-2 border-b border-neutral-700">
-        <button onClick={() => setShowStyle(!showStyle)} className="text-[10px] text-neutral-500 hover:text-neutral-400">
-          {showStyle ? '▼' : '▶'} Style
-        </button>
-        {showStyle && <div className="mt-1.5"><StyleEditor style={style} onChange={onStyleChange} /></div>}
-      </div>
-      
-      {/* List */}
-      <div className="flex-1 overflow-y-auto p-2">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[9px] text-neutral-600">HOTSPOTS ({hotspots.length})</span>
-          {saving && <span className="text-[9px] text-amber-500">Saving...</span>}
-        </div>
-        
-        <div className="space-y-0.5">
-          {hotspots.map(h => (
-            <button
-              key={h.id}
-              onClick={() => onSelectHotspot(h.id)}
-              className={`w-full text-left px-1.5 py-1 rounded text-[11px] ${selectedId === h.id ? 'bg-amber-900/40 text-amber-100' : 'text-neutral-400 hover:bg-neutral-800'}`}
-            >
-              <div className="flex items-center justify-between">
-                <span>{h.name_en}</span>
-                {h.viewpoint_position && <span className="text-[9px] text-green-500">📷</span>}
-              </div>
-            </button>
-          ))}
-        </div>
-        
-        {hotspots.length === 0 && !loading && (
-          <p className="text-neutral-600 text-[10px] text-center py-3">No hotspots</p>
-        )}
-      </div>
-      
-      {/* Footer */}
-      <div className="p-2 border-t border-neutral-800 text-[9px] text-neutral-700">
-        <div>{config?.id ? `Config: ${config.id.slice(0,8)}` : <span className="text-red-400">No config</span>}</div>
-      </div>
-    </div>
-  )
-}
-
-// ============================================
-// Main Component
-// ============================================
-export default function HotspotEditor() {
+function EditorPanel() {
   const { config, hotspots, loading, error, saveHotspotBounds } = useSplatData()
   
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -674,6 +487,9 @@ export default function HotspotEditor() {
   const [saving, setSaving] = useState(false)
   const [style, setStyle] = useState(DEFAULT_STYLE)
   const [localHotspots, setLocalHotspots] = useState<ParsedSplatHotspot[]>([])
+  const [newName, setNewName] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [showStyle, setShowStyle] = useState(false)
   
   // Debounce ref
   const saveTimeoutRef = useRef<number>()
@@ -745,11 +561,19 @@ export default function HotspotEditor() {
     }, 400)
   }
   
+  const handleCreate = () => {
+    if (newName.trim()) {
+      handleCreateHotspot(newName.trim())
+      setNewName('')
+    }
+  }
+  
+  const selectedHotspot = localHotspots.find(h => h.id === selectedId)
+  
   return (
-    <div className="w-screen h-screen bg-black flex">
-      {/* Viewer area - NO conditional rendering */}
-      <div className="flex-1 relative bg-neutral-950">
-        <SplatViewer />
+    <>
+      {/* Overlay on top of splat viewer */}
+      <div className="absolute inset-0 pointer-events-auto">
         <Overlay
           hotspots={localHotspots.filter(h => h.shape === 'polygon')}
           selectedId={selectedId}
@@ -765,23 +589,155 @@ export default function HotspotEditor() {
         />
       </div>
       
-      <Sidebar
-        hotspots={localHotspots}
-        selectedId={selectedId}
-        onSelectHotspot={handleSelectHotspot}
-        mode={mode}
-        onSetMode={handleSetMode}
-        onCreateHotspot={handleCreateHotspot}
-        onDeleteHotspot={handleDeleteHotspot}
-        drawingPoints={drawingPoints}
-        onCancelDrawing={() => setDrawingPoints([])}
-        saving={saving}
-        config={config}
-        loading={loading}
-        error={error}
-        style={style}
-        onStyleChange={setStyle}
-      />
+      {/* Sidebar */}
+      <div className="w-64 bg-neutral-900 text-white text-sm flex flex-col relative z-10">
+        {/* Header */}
+        <div className="p-2 border-b border-neutral-700">
+          <Link to="/admin" className="text-amber-600 hover:text-amber-500 text-[10px]">
+            ← Admin
+          </Link>
+          <h1 className="text-sm font-medium text-neutral-200 mt-0.5">Hotspot Editor</h1>
+          <p className="text-[9px] text-neutral-600 mt-0.5">
+            Static view matches visitor kiosk
+          </p>
+        </div>
+        
+        {loading && <div className="p-2 bg-neutral-800 text-neutral-400 text-[10px]">Loading...</div>}
+        {error && <div className="p-2 bg-red-900/30 text-red-400 text-[10px]">{error}</div>}
+        
+        {/* Mode Toggle */}
+        <div className="p-2 border-b border-neutral-700">
+          <div className="flex gap-1">
+            <button
+              onClick={() => handleSetMode('select')}
+              className={`flex-1 py-1 rounded text-[11px] ${mode === 'select' ? 'bg-amber-800 text-white' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}
+            >
+              Select
+            </button>
+            <button
+              onClick={() => handleSetMode('draw')}
+              className={`flex-1 py-1 rounded text-[11px] ${mode === 'draw' ? 'bg-amber-800 text-white' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}
+            >
+              Draw
+            </button>
+          </div>
+          
+          {mode === 'draw' && (
+            <div className="mt-1.5 text-[10px] text-neutral-500">
+              Click to place. Double-click to close.
+              {drawingPoints.length > 0 && (
+                <span className="ml-2 text-neutral-400">
+                  {drawingPoints.length} pts
+                  <button onClick={() => setDrawingPoints([])} className="ml-2 text-red-400 hover:text-red-300">Cancel</button>
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+        
+        {/* Save new */}
+        {mode === 'draw' && drawingPoints.length >= 3 && (
+          <div className="p-2 border-b border-neutral-700 bg-green-900/20">
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Name..."
+              className="w-full bg-neutral-800 border border-neutral-600 rounded px-2 py-1 text-[11px] focus:border-green-500 focus:outline-none"
+              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+              autoFocus
+            />
+            <button
+              onClick={handleCreate}
+              disabled={!newName.trim()}
+              className="w-full mt-1 bg-green-700 hover:bg-green-600 disabled:bg-neutral-700 disabled:text-neutral-500 py-1 rounded text-[11px]"
+            >
+              Save
+            </button>
+          </div>
+        )}
+        
+        {/* Selected */}
+        {mode === 'select' && selectedHotspot && (
+          <div className="p-2 border-b border-neutral-700 bg-amber-900/10">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-amber-400">{selectedHotspot.name_en}</span>
+              <span className="text-[9px] text-neutral-600">
+                {(selectedHotspot.bounds as PolygonBounds).points.length} pts
+              </span>
+            </div>
+            <p className="text-[9px] text-neutral-600 mt-1">Drag • Click edge to add • Right-click to delete</p>
+            
+            {confirmDelete === selectedHotspot.id ? (
+              <div className="flex gap-1 mt-1.5">
+                <button onClick={() => { handleDeleteHotspot(selectedHotspot.id); setConfirmDelete(null) }} className="flex-1 bg-red-700 py-0.5 rounded text-[10px]">Delete</button>
+                <button onClick={() => setConfirmDelete(null)} className="flex-1 bg-neutral-700 py-0.5 rounded text-[10px]">Cancel</button>
+              </div>
+            ) : (
+              <div className="flex gap-2 mt-1.5 text-[10px]">
+                <button onClick={() => setConfirmDelete(selectedHotspot.id)} className="text-red-400 hover:text-red-300">Delete</button>
+                <button onClick={() => setSelectedId(null)} className="text-neutral-500 hover:text-neutral-400">Deselect</button>
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Style */}
+        <div className="p-2 border-b border-neutral-700">
+          <button onClick={() => setShowStyle(!showStyle)} className="text-[10px] text-neutral-500 hover:text-neutral-400">
+            {showStyle ? '▼' : '▶'} Style
+          </button>
+          {showStyle && <div className="mt-1.5"><StyleEditor style={style} onChange={setStyle} /></div>}
+        </div>
+        
+        {/* List */}
+        <div className="flex-1 overflow-y-auto p-2">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[9px] text-neutral-600">HOTSPOTS ({localHotspots.length})</span>
+            {saving && <span className="text-[9px] text-amber-500">Saving...</span>}
+          </div>
+          
+          <div className="space-y-0.5">
+            {localHotspots.map(h => (
+              <button
+                key={h.id}
+                onClick={() => setSelectedId(h.id)}
+                className={`w-full text-left px-1.5 py-1 rounded text-[11px] ${selectedId === h.id ? 'bg-amber-900/40 text-amber-100' : 'text-neutral-400 hover:bg-neutral-800'}`}
+              >
+                <div className="flex items-center justify-between">
+                  <span>{h.name_en}</span>
+                  {h.viewpoint_position && <span className="text-[9px] text-green-500">📷</span>}
+                </div>
+              </button>
+            ))}
+          </div>
+          
+          {localHotspots.length === 0 && !loading && (
+            <p className="text-neutral-600 text-[10px] text-center py-3">No hotspots</p>
+          )}
+        </div>
+        
+        {/* Footer */}
+        <div className="p-2 border-t border-neutral-800 text-[9px] text-neutral-700">
+          <div>{config?.id ? `Config: ${config.id.slice(0,8)}` : <span className="text-red-400">No config</span>}</div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+// ============================================
+// Main Component - STATELESS! Just layout.
+// ============================================
+export default function HotspotEditor() {
+  return (
+    <div className="w-screen h-screen bg-black flex">
+      {/* Viewer area - left side, contains splat */}
+      <div className="flex-1 relative">
+        <SplatViewer />
+        {/* EditorPanel renders overlay + sidebar */}
+        <EditorPanel />
+      </div>
     </div>
   )
 }
