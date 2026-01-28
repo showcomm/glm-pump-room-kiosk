@@ -5,7 +5,8 @@
  * 1. Mouse orbit/zoom to roughly position camera
  * 2. Numeric inputs to fine-tune exact values
  * 
- * Camera position syncs both ways - orbit updates inputs, inputs update camera.
+ * When using numeric inputs, orbit controls are temporarily disabled
+ * so they don't fight with manual positioning.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
@@ -27,6 +28,7 @@ const INITIAL = getOverviewViewpoint()
 let pauseCameraSync = false
 let currentPosition: [number, number, number] = [...INITIAL.position]
 let currentRotation: [number, number, number] = [...INITIAL.rotation]
+let currentFov: number = INITIAL.fov || 60
 
 // ============================================
 // Splat Component
@@ -56,27 +58,45 @@ function CameraController() {
       const cameraEntity = app.root.findByName('camera')
       if (!cameraEntity) return
       
-      const { position, rotation } = e.detail
+      const { position, rotation, fov } = e.detail
+      
+      // Disable CameraControls script while setting position manually
+      if (cameraEntity.script?.cameraControls) {
+        cameraEntity.script.cameraControls.enabled = false
+      }
+      
       cameraEntity.setPosition(position[0], position[1], position[2])
       cameraEntity.setEulerAngles(rotation[0], rotation[1], rotation[2])
+      
+      if (fov && cameraEntity.camera) {
+        cameraEntity.camera.fov = fov
+      }
+    }
+    
+    // Handle re-enabling orbit controls
+    const handleEnableOrbit = () => {
+      const cameraEntity = app.root.findByName('camera')
+      if (cameraEntity?.script?.cameraControls) {
+        cameraEntity.script.cameraControls.enabled = true
+      }
     }
     
     window.addEventListener('set-camera-transform', handleSetTransform as EventListener)
+    window.addEventListener('enable-orbit-controls', handleEnableOrbit)
     
     // Broadcast camera position to UI continuously
     const broadcastPosition = () => {
-      // Don't broadcast while UI is editing (prevents feedback loop)
       if (!pauseCameraSync) {
         const cameraEntity = app.root.findByName('camera')
         if (cameraEntity) {
           const pos = cameraEntity.getPosition()
           const rot = cameraEntity.getEulerAngles()
-          // Update global state
+          const fov = cameraEntity.camera?.fov || 60
           currentPosition = [pos.x, pos.y, pos.z]
           currentRotation = [rot.x, rot.y, rot.z]
-          // Dispatch to React
+          currentFov = fov
           window.dispatchEvent(new CustomEvent('camera-position-update', {
-            detail: { position: currentPosition, rotation: currentRotation }
+            detail: { position: currentPosition, rotation: currentRotation, fov: currentFov }
           }))
         }
       }
@@ -87,6 +107,7 @@ function CameraController() {
     
     return () => {
       window.removeEventListener('set-camera-transform', handleSetTransform as EventListener)
+      window.removeEventListener('enable-orbit-controls', handleEnableOrbit)
       if (frameRef.current) cancelAnimationFrame(frameRef.current)
     }
   }, [app])
@@ -102,9 +123,10 @@ interface DragInputProps {
   onChange: (value: number) => void
   step?: number
   decimals?: number
+  width?: string
 }
 
-function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps) {
+function DragInput({ value, onChange, step = 0.1, decimals = 2, width = 'w-[72px]' }: DragInputProps) {
   const [localValue, setLocalValue] = useState(value.toFixed(decimals))
   const [isDragging, setIsDragging] = useState(false)
   const [isHovering, setIsHovering] = useState(false)
@@ -124,7 +146,6 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
     e.preventDefault()
     e.stopPropagation()
     
-    // Pause camera sync BEFORE we start
     pauseCameraSync = true
     setIsDragging(true)
     
@@ -139,10 +160,7 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
       const delta = deltaX * step * 0.5
       const newValue = Number((dragStartValue.current + delta).toFixed(decimals))
       
-      // Update local display immediately
       setLocalValue(newValue.toFixed(decimals))
-      
-      // Call parent onChange
       onChange(newValue)
     }
     
@@ -153,7 +171,6 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
       
-      // Resume camera sync after delay
       setTimeout(() => { pauseCameraSync = false }, 150)
     }
     
@@ -177,8 +194,6 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
       onChange(Number(parsed.toFixed(decimals)))
     }
     setLocalValue(value.toFixed(decimals))
-    
-    // Resume camera sync after blur
     setTimeout(() => { pauseCameraSync = false }, 150)
   }
   
@@ -192,7 +207,6 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
     >
-      {/* Drag handle on left edge */}
       <div
         onMouseDown={handleDragStart}
         className={`absolute left-0 top-0 bottom-0 w-4 flex items-center justify-center 
@@ -211,9 +225,9 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
         onFocus={handleFocus}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
-        className="w-[72px] pl-5 pr-1 py-1 bg-neutral-800 border border-neutral-600 rounded 
+        className={`${width} pl-5 pr-1 py-1 bg-neutral-800 border border-neutral-600 rounded 
                    text-xs text-white text-right font-mono
-                   focus:border-amber-600 focus:outline-none"
+                   focus:border-amber-600 focus:outline-none`}
       />
     </div>
   )
@@ -250,16 +264,19 @@ function TransformRow({ label, values, onChange, step = 0.1, decimals = 2 }: Tra
 function Sidebar() {
   const [position, setPosition] = useState<[number, number, number]>([...INITIAL.position])
   const [rotation, setRotation] = useState<[number, number, number]>([...INITIAL.rotation])
+  const [fov, setFov] = useState<number>(INITIAL.fov || 60)
   const [selectedEquipment, setSelectedEquipment] = useState<string | null>(null)
   const [savedViewpoints, setSavedViewpoints] = useState<Record<string, any>>({})
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null)
+  const [orbitEnabled, setOrbitEnabled] = useState(true)
   
   // Listen for camera position updates from the 3D viewer
   useEffect(() => {
     const handleCameraUpdate = (e: CustomEvent) => {
-      const { position: pos, rotation: rot } = e.detail
+      const { position: pos, rotation: rot, fov: f } = e.detail
       setPosition([pos[0], pos[1], pos[2]])
       setRotation([rot[0], rot[1], rot[2]])
+      if (f) setFov(f)
     }
     
     window.addEventListener('camera-position-update', handleCameraUpdate as EventListener)
@@ -267,38 +284,51 @@ function Sidebar() {
   }, [])
   
   // Send transform command to camera
-  const updateCamera = useCallback((pos: [number, number, number], rot: [number, number, number]) => {
+  const updateCamera = useCallback((pos: [number, number, number], rot: [number, number, number], f: number) => {
+    setOrbitEnabled(false)
     window.dispatchEvent(new CustomEvent('set-camera-transform', {
-      detail: { position: pos, rotation: rot }
+      detail: { position: pos, rotation: rot, fov: f }
     }))
   }, [])
   
   const handlePositionChange = useCallback((axis: 0 | 1 | 2, value: number) => {
-    // Use current global state to get latest rotation
     const newPos: [number, number, number] = [...currentPosition]
     newPos[axis] = value
     currentPosition = newPos
     setPosition(newPos)
-    updateCamera(newPos, currentRotation)
+    updateCamera(newPos, currentRotation, currentFov)
   }, [updateCamera])
   
   const handleRotationChange = useCallback((axis: 0 | 1 | 2, value: number) => {
-    // Use current global state to get latest position
     const newRot: [number, number, number] = [...currentRotation]
     newRot[axis] = value
     currentRotation = newRot
     setRotation(newRot)
-    updateCamera(currentPosition, newRot)
+    updateCamera(currentPosition, newRot, currentFov)
   }, [updateCamera])
+  
+  const handleFovChange = useCallback((value: number) => {
+    currentFov = value
+    setFov(value)
+    updateCamera(currentPosition, currentRotation, value)
+  }, [updateCamera])
+  
+  const handleEnableOrbit = () => {
+    setOrbitEnabled(true)
+    window.dispatchEvent(new CustomEvent('enable-orbit-controls'))
+  }
   
   const handleReset = () => {
     const newPos: [number, number, number] = [...INITIAL.position]
     const newRot: [number, number, number] = [...INITIAL.rotation]
+    const newFov = INITIAL.fov || 60
     currentPosition = newPos
     currentRotation = newRot
+    currentFov = newFov
     setPosition(newPos)
     setRotation(newRot)
-    updateCamera(newPos, newRot)
+    setFov(newFov)
+    updateCamera(newPos, newRot, newFov)
   }
   
   const handleLoadViewpoint = (id: string) => {
@@ -306,21 +336,23 @@ function Sidebar() {
     if (vp) {
       currentPosition = [...vp.position]
       currentRotation = [...vp.rotation]
+      currentFov = vp.fov || 60
       setPosition([...vp.position])
       setRotation([...vp.rotation])
-      updateCamera(vp.position, vp.rotation)
+      setFov(vp.fov || 60)
+      updateCamera(vp.position, vp.rotation, vp.fov || 60)
       setSelectedEquipment(id)
     }
   }
   
-  const generateCode = (equipmentId: string, pos: number[], rot: number[]) => {
+  const generateCode = (equipmentId: string, pos: number[], rot: number[], f: number) => {
     const item = equipment.find(e => e.id === equipmentId)
     return `{
   id: '${equipmentId}-view',
   equipment_id: '${equipmentId}',
   position: [${pos.map(v => v.toFixed(3)).join(', ')}],
   rotation: [${rot.map(v => v.toFixed(2)).join(', ')}],
-  fov: 60,
+  fov: ${f.toFixed(0)},
   label: { en: '${item?.name.en || ''}', fr: '${item?.name.fr || ''}' }
 },`
   }
@@ -332,11 +364,12 @@ function Sidebar() {
       equipment_id: selectedEquipment,
       position: [...position],
       rotation: [...rotation],
+      fov: fov,
     }
     
     setSavedViewpoints(prev => ({ ...prev, [selectedEquipment]: viewpoint }))
     
-    const code = generateCode(selectedEquipment, position, rotation)
+    const code = generateCode(selectedEquipment, position, rotation, fov)
     navigator.clipboard.writeText(code)
     setCopyFeedback('Copied!')
     setTimeout(() => setCopyFeedback(null), 1500)
@@ -344,7 +377,7 @@ function Sidebar() {
   
   const handleCopyAll = () => {
     const allCode = Object.values(savedViewpoints)
-      .map(vp => generateCode(vp.equipment_id, vp.position, vp.rotation))
+      .map(vp => generateCode(vp.equipment_id, vp.position, vp.rotation, vp.fov || 60))
       .join('\n')
     navigator.clipboard.writeText(allCode)
     setCopyFeedback('All copied!')
@@ -372,10 +405,27 @@ function Sidebar() {
         <div className="space-y-2">
           <TransformRow label="Position" values={position} onChange={handlePositionChange} step={0.05} decimals={2} />
           <TransformRow label="Rotation" values={rotation} onChange={handleRotationChange} step={0.5} decimals={1} />
+          <div className="flex items-center gap-1 text-xs">
+            <span className="text-neutral-400 w-12">FOV</span>
+            <DragInput value={fov} onChange={handleFovChange} step={1} decimals={0} width="w-[60px]" />
+            <span className="text-neutral-500 text-[10px] ml-1">degrees</span>
+          </div>
         </div>
-        <p className="text-[10px] text-neutral-600 mt-2">
-          Orbit/zoom with mouse • Drag ⇔ handles or type to fine-tune
-        </p>
+        
+        {/* Orbit mode toggle */}
+        <div className="mt-3 flex items-center justify-between">
+          <p className="text-[10px] text-neutral-600">
+            {orbitEnabled ? 'Orbit/zoom with mouse' : 'Orbit disabled (manual mode)'}
+          </p>
+          {!orbitEnabled && (
+            <button 
+              onClick={handleEnableOrbit}
+              className="text-[10px] text-amber-600 hover:text-amber-500"
+            >
+              Re-enable orbit
+            </button>
+          )}
+        </div>
       </div>
       
       {/* Equipment Selection */}
@@ -429,7 +479,7 @@ function Sidebar() {
             >
               <div className="text-neutral-200">{equipment.find(e => e.id === id)?.name.en}</div>
               <div className="text-neutral-500 font-mono text-[10px]">
-                pos: [{vp.position.map((v: number) => v.toFixed(1)).join(', ')}]
+                pos: [{vp.position.map((v: number) => v.toFixed(1)).join(', ')}] • fov: {vp.fov || 60}
               </div>
               <div className="text-neutral-500 font-mono text-[10px]">
                 rot: [{vp.rotation.map((v: number) => v.toFixed(1)).join(', ')}]
@@ -445,7 +495,6 @@ function Sidebar() {
       
       {/* Footer */}
       <div className="p-3 border-t border-neutral-700 text-[10px] text-neutral-600">
-        <strong>Controls:</strong> Left-drag orbit, scroll zoom<br/>
         Code copies to clipboard → paste into <code className="text-neutral-500">viewpoints.ts</code>
       </div>
     </div>
@@ -460,7 +509,7 @@ function SplatViewer() {
     <div className="flex-1">
       <Application graphicsDeviceOptions={{ antialias: false }}>
         <Entity name="camera" position={INITIAL.position} rotation={INITIAL.rotation}>
-          <Camera clearColor="#1a1a2e" fov={60} farClip={1000} nearClip={0.01} />
+          <Camera clearColor="#1a1a2e" fov={INITIAL.fov || 60} farClip={1000} nearClip={0.01} />
           <Script script={CameraControls} />
         </Entity>
         <PumpRoomSplat src={SPLAT_URL} />
