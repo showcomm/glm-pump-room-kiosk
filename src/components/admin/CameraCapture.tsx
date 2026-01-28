@@ -23,6 +23,9 @@ import { getOverviewViewpoint } from '../../data/viewpoints'
 const SPLAT_URL = '/pump-room.ply'
 const INITIAL = getOverviewViewpoint()
 
+// Global flag to pause camera sync during UI edits
+let pauseCameraSync = false
+
 // ============================================
 // Splat Component
 // ============================================
@@ -38,12 +41,10 @@ function PumpRoomSplat({ src }: { src: string }) {
 
 // ============================================
 // Camera Controller - two-way sync
-// Broadcasts position to UI, receives position commands from UI
 // ============================================
 function CameraController() {
   const app = useApp()
   const frameRef = useRef<number>()
-  const isSettingFromUI = useRef(false)
   
   useEffect(() => {
     if (!app) return
@@ -53,21 +54,17 @@ function CameraController() {
       const cameraEntity = app.root.findByName('camera')
       if (!cameraEntity) return
       
-      isSettingFromUI.current = true
       const { position, rotation } = e.detail
       cameraEntity.setPosition(position[0], position[1], position[2])
       cameraEntity.setEulerAngles(rotation[0], rotation[1], rotation[2])
-      
-      // Reset flag after a short delay
-      setTimeout(() => { isSettingFromUI.current = false }, 50)
     }
     
     window.addEventListener('set-camera-transform', handleSetTransform as EventListener)
     
     // Broadcast camera position to UI continuously
     const broadcastPosition = () => {
-      // Don't broadcast while UI is setting position (prevents feedback loop)
-      if (!isSettingFromUI.current) {
+      // Don't broadcast while UI is editing (prevents feedback loop)
+      if (!pauseCameraSync) {
         const cameraEntity = app.root.findByName('camera')
         if (cameraEntity) {
           const pos = cameraEntity.getPosition()
@@ -108,20 +105,25 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
   const [localValue, setLocalValue] = useState(value.toFixed(decimals))
   const [isDragging, setIsDragging] = useState(false)
   const [isHovering, setIsHovering] = useState(false)
+  const [isFocused, setIsFocused] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const dragStartX = useRef(0)
   const dragStartValue = useRef(0)
   
-  // Sync from prop when not dragging
+  // Sync from prop when not dragging and not focused
   useEffect(() => {
-    if (!isDragging && document.activeElement !== inputRef.current) {
+    if (!isDragging && !isFocused) {
       setLocalValue(value.toFixed(decimals))
     }
-  }, [value, decimals, isDragging])
+  }, [value, decimals, isDragging, isFocused])
   
   const handleDragStart = (e: React.MouseEvent) => {
     e.preventDefault()
+    e.stopPropagation()
+    
     setIsDragging(true)
+    pauseCameraSync = true // Pause camera sync while dragging
+    
     dragStartX.current = e.clientX
     dragStartValue.current = value
     document.body.style.cursor = 'ew-resize'
@@ -130,7 +132,9 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
     const handleMouseMove = (e: MouseEvent) => {
       const delta = (e.clientX - dragStartX.current) * step * 0.5
       const newValue = dragStartValue.current + delta
-      onChange(Number(newValue.toFixed(decimals)))
+      const rounded = Number(newValue.toFixed(decimals))
+      setLocalValue(rounded.toFixed(decimals))
+      onChange(rounded)
     }
     
     const handleMouseUp = () => {
@@ -139,6 +143,9 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
       document.body.style.userSelect = ''
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
+      
+      // Resume camera sync after a short delay
+      setTimeout(() => { pauseCameraSync = false }, 100)
     }
     
     document.addEventListener('mousemove', handleMouseMove)
@@ -149,12 +156,21 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
     setLocalValue(e.target.value)
   }
   
+  const handleFocus = () => {
+    setIsFocused(true)
+    pauseCameraSync = true
+  }
+  
   const handleBlur = () => {
+    setIsFocused(false)
     const parsed = parseFloat(localValue)
     if (!isNaN(parsed)) {
       onChange(Number(parsed.toFixed(decimals)))
     }
     setLocalValue(value.toFixed(decimals))
+    
+    // Resume camera sync after blur
+    setTimeout(() => { pauseCameraSync = false }, 100)
   }
   
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -167,15 +183,17 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
     >
-      {/* Drag handle */}
+      {/* Drag handle on left edge */}
       <div
         onMouseDown={handleDragStart}
         className={`absolute left-0 top-0 bottom-0 w-3 flex items-center justify-center 
-                    cursor-ew-resize rounded-l border-r border-neutral-600
-                    transition-colors ${isHovering || isDragging ? 'bg-amber-800' : 'bg-neutral-700'}`}
-        title="Drag to adjust"
+                    cursor-ew-resize rounded-l border-r border-neutral-600 z-10
+                    transition-colors ${isHovering || isDragging ? 'bg-amber-700' : 'bg-neutral-700'}`}
+        title="Drag left/right to adjust"
       >
-        <span className="text-[8px] text-neutral-400">⋮</span>
+        <svg className="w-2 h-3" viewBox="0 0 8 12" fill="currentColor">
+          <path d="M2 0v12M6 0v12" stroke="currentColor" strokeWidth="1.5" fill="none" opacity="0.5"/>
+        </svg>
       </div>
       
       <input
@@ -183,6 +201,7 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
         type="text"
         value={localValue}
         onChange={handleChange}
+        onFocus={handleFocus}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
         className="w-[70px] pl-4 pr-1 py-1 bg-neutral-800 border border-neutral-600 rounded 
@@ -340,7 +359,7 @@ function Sidebar() {
           <TransformRow label="Rotation" values={rotation} onChange={handleRotationChange} step={0.5} decimals={1} />
         </div>
         <p className="text-[10px] text-neutral-600 mt-2">
-          Orbit/zoom with mouse, fine-tune by dragging handle or typing
+          Orbit/zoom with mouse • Drag handles or type to fine-tune
         </p>
       </div>
       
@@ -395,7 +414,10 @@ function Sidebar() {
             >
               <div className="text-neutral-200">{equipment.find(e => e.id === id)?.name.en}</div>
               <div className="text-neutral-500 font-mono text-[10px]">
-                [{vp.position.map((v: number) => v.toFixed(1)).join(', ')}]
+                pos: [{vp.position.map((v: number) => v.toFixed(1)).join(', ')}]
+              </div>
+              <div className="text-neutral-500 font-mono text-[10px]">
+                rot: [{vp.rotation.map((v: number) => v.toFixed(1)).join(', ')}]
               </div>
             </button>
           ))}
