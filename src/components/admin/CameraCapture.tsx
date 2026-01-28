@@ -46,7 +46,7 @@ function PumpRoomSplat({ src }: { src: string }) {
 
 // ============================================
 // Camera Helper - broadcasts position via window events
-// Also adds WASD keyboard controls for panning
+// Adds camera-relative WASD controls and reset function
 // ============================================
 function CameraHelper() {
   const app = useApp()
@@ -69,10 +69,25 @@ function CameraHelper() {
       }
     }
     
-    ;(window as any).captureCamera = getCameraData
+    const resetCamera = () => {
+      const cameraEntity = app.root.findByName('camera')
+      if (!cameraEntity) return
+      
+      cameraEntity.setPosition(INITIAL.position[0], INITIAL.position[1], INITIAL.position[2])
+      cameraEntity.setEulerAngles(INITIAL.rotation[0], INITIAL.rotation[1], INITIAL.rotation[2])
+      
+      // Also need to reset the CameraControls script's internal state
+      // Dispatch event so UI knows
+      window.dispatchEvent(new CustomEvent('camera-reset'))
+    }
     
-    // Keyboard controls for panning
+    ;(window as any).captureCamera = getCameraData
+    ;(window as any).resetCamera = resetCamera
+    
+    // Keyboard controls
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't capture if user is typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
       keysPressed.current.add(e.key.toLowerCase())
     }
     
@@ -83,25 +98,59 @@ function CameraHelper() {
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('keyup', handleKeyUp)
     
-    const PAN_SPEED = 0.05
+    const PAN_SPEED = 0.02
     
     const updateLoop = () => {
       const cameraEntity = app.root.findByName('camera')
       
-      // Handle WASD panning
+      // Handle WASD panning - camera relative
       if (cameraEntity && keysPressed.current.size > 0) {
-        const pos = cameraEntity.getPosition()
-        let dx = 0, dy = 0, dz = 0
+        // Get camera's local axes
+        const forward = cameraEntity.forward.clone()
+        const right = cameraEntity.right.clone()
+        const up = cameraEntity.up.clone()
         
-        if (keysPressed.current.has('w')) dz -= PAN_SPEED
-        if (keysPressed.current.has('s')) dz += PAN_SPEED
-        if (keysPressed.current.has('a')) dx -= PAN_SPEED
-        if (keysPressed.current.has('d')) dx += PAN_SPEED
-        if (keysPressed.current.has('q')) dy -= PAN_SPEED
-        if (keysPressed.current.has('e')) dy += PAN_SPEED
+        let moveX = 0, moveY = 0, moveZ = 0
         
-        if (dx !== 0 || dy !== 0 || dz !== 0) {
-          cameraEntity.setPosition(pos.x + dx, pos.y + dy, pos.z + dz)
+        // W/S - move along camera's forward direction
+        if (keysPressed.current.has('w')) {
+          moveX += forward.x * PAN_SPEED
+          moveY += forward.y * PAN_SPEED
+          moveZ += forward.z * PAN_SPEED
+        }
+        if (keysPressed.current.has('s')) {
+          moveX -= forward.x * PAN_SPEED
+          moveY -= forward.y * PAN_SPEED
+          moveZ -= forward.z * PAN_SPEED
+        }
+        
+        // A/D - move along camera's right direction
+        if (keysPressed.current.has('d')) {
+          moveX += right.x * PAN_SPEED
+          moveY += right.y * PAN_SPEED
+          moveZ += right.z * PAN_SPEED
+        }
+        if (keysPressed.current.has('a')) {
+          moveX -= right.x * PAN_SPEED
+          moveY -= right.y * PAN_SPEED
+          moveZ -= right.z * PAN_SPEED
+        }
+        
+        // Q/E - move along camera's up direction
+        if (keysPressed.current.has('e')) {
+          moveX += up.x * PAN_SPEED
+          moveY += up.y * PAN_SPEED
+          moveZ += up.z * PAN_SPEED
+        }
+        if (keysPressed.current.has('q')) {
+          moveX -= up.x * PAN_SPEED
+          moveY -= up.y * PAN_SPEED
+          moveZ -= up.z * PAN_SPEED
+        }
+        
+        if (moveX !== 0 || moveY !== 0 || moveZ !== 0) {
+          const pos = cameraEntity.getPosition()
+          cameraEntity.setPosition(pos.x + moveX, pos.y + moveY, pos.z + moveZ)
         }
       }
       
@@ -116,6 +165,7 @@ function CameraHelper() {
     
     return () => {
       delete (window as any).captureCamera
+      delete (window as any).resetCamera
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
       if (frameRef.current) cancelAnimationFrame(frameRef.current)
@@ -142,6 +192,12 @@ function Sidebar() {
   const formatNum = (v: number, decimals: number = 3) => {
     const rounded = Number(v.toFixed(decimals))
     return Object.is(rounded, -0) ? '0' : rounded.toFixed(decimals)
+  }
+  
+  const handleReset = () => {
+    if ((window as any).resetCamera) {
+      (window as any).resetCamera()
+    }
   }
   
   const handleCapture = () => {
@@ -211,11 +267,19 @@ function Sidebar() {
       </div>
       
       {/* Current Position */}
-      <div className="bg-black/50 rounded-lg p-4 mb-6 font-mono text-sm">
+      <div className="bg-black/50 rounded-lg p-4 mb-4 font-mono text-sm">
         <div className="text-gray-400 mb-2">Current Camera</div>
         <div>Pos: [{cameraData.pos.map(v => formatNum(v, 2)).join(', ')}]</div>
         <div>Rot: [{cameraData.rot.map(v => formatNum(v, 1)).join(', ')}]</div>
       </div>
+      
+      {/* Reset Button */}
+      <button
+        onClick={handleReset}
+        className="w-full bg-gray-600 hover:bg-gray-500 py-2 rounded text-sm mb-6"
+      >
+        Reset Camera to Initial Position
+      </button>
       
       {/* Equipment Selection */}
       <div className="mb-6">
@@ -288,8 +352,9 @@ function Sidebar() {
         <ul className="space-y-1 mb-4">
           <li>• Left-drag: Orbit</li>
           <li>• Scroll: Zoom</li>
-          <li>• WASD: Pan horizontally</li>
-          <li>• Q/E: Pan up/down</li>
+          <li>• W/S: Move forward/back</li>
+          <li>• A/D: Move left/right</li>
+          <li>• Q/E: Move down/up</li>
         </ul>
         <p className="mb-2"><strong>Workflow:</strong></p>
         <ol className="list-decimal list-inside space-y-1">
@@ -330,7 +395,7 @@ function SplatViewer() {
       
       {/* Controls overlay */}
       <div className="absolute bottom-4 left-4 bg-black/70 text-white px-4 py-2 rounded text-sm">
-        Orbit: left-drag | Zoom: scroll | Pan: WASD + Q/E
+        Orbit: left-drag | Zoom: scroll | Move: WASD + Q/E
       </div>
     </div>
   )
