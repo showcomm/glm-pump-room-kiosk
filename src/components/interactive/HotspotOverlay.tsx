@@ -3,6 +3,9 @@
  * 
  * Renders hotspots as semi-transparent regions that visitors can tap
  * to navigate to equipment viewpoints.
+ * 
+ * Note: Using viewBox="0 0 100 100" so coordinates are effectively percentages.
+ * SVG polygon points don't accept % units, so we use raw numbers within the viewBox.
  */
 
 import { useKioskStore } from '../../store/kioskStore'
@@ -31,14 +34,15 @@ export function HotspotOverlay({ frameWidth }: HotspotOverlayProps) {
   }
   
   const renderHotspotShape = (coords: HotspotCoordinates, id: string) => {
+    // Since viewBox is "0 0 100 100", raw numbers act as percentages
     switch (coords.type) {
       case 'circle':
         return (
           <circle
             key={id}
-            cx={`${coords.center_x}%`}
-            cy={`${coords.center_y}%`}
-            r={`${coords.radius}%`}
+            cx={coords.center_x}
+            cy={coords.center_y}
+            r={coords.radius}
             className="hotspot-shape"
           />
         )
@@ -46,16 +50,17 @@ export function HotspotOverlay({ frameWidth }: HotspotOverlayProps) {
         return (
           <rect
             key={id}
-            x={`${coords.x}%`}
-            y={`${coords.y}%`}
-            width={`${coords.width}%`}
-            height={`${coords.height}%`}
+            x={coords.x}
+            y={coords.y}
+            width={coords.width}
+            height={coords.height}
             className="hotspot-shape"
           />
         )
       case 'polygon':
+        // polygon points must be numbers, not percentages
         const points = coords.points
-          .map(p => `${p.x}%,${p.y}%`)
+          .map(p => `${p.x},${p.y}`)
           .join(' ')
         return (
           <polygon
@@ -122,8 +127,8 @@ export function HotspotOverlay({ frameWidth }: HotspotOverlayProps) {
             {/* Label on hover - positioned near the hotspot */}
             {item.hotspot.coordinates.type === 'rectangle' && (
               <text
-                x={`${item.hotspot.coordinates.x + item.hotspot.coordinates.width / 2}%`}
-                y={`${item.hotspot.coordinates.y - 2}%`}
+                x={item.hotspot.coordinates.x + item.hotspot.coordinates.width / 2}
+                y={item.hotspot.coordinates.y - 2}
                 textAnchor="middle"
                 className="fill-museum-highlight text-[2px] font-body opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
               >
