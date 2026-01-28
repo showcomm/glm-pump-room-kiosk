@@ -3,17 +3,9 @@
  * 
  * CRITICAL: PlayCanvas Application must be COMPLETELY ISOLATED from React state.
  * The SplatScene component is memoized and has NO props that change.
- * 
- * Features:
- * - Draw polygon hotspots over the splat viewer
- * - Click to place points, double-click to close shape
- * - Edit existing polygons by dragging vertices
- * - Add new vertices by clicking midpoints
- * - Delete hotspots via sidebar button
- * - Saves directly to Supabase
  */
 
-import React, { useState, useEffect, useRef, useCallback, memo } from 'react'
+import React, { useState, useEffect, useRef, memo } from 'react'
 import { Link } from 'react-router-dom'
 import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat } from '@playcanvas/react/components'
@@ -27,11 +19,45 @@ import { createHotspot, deleteHotspot } from '../../lib/api/splat'
 // ============================================
 const SPLAT_URL = '/pump-room.ply'
 
-// Fixed overview position - NO camera controls, static view for polygon editing
 const OVERVIEW = {
   position: [-0.005, -6.86, 0.296] as [number, number, number],
   rotation: [87.53, -0.96, 0] as [number, number, number],
   fov: 60
+}
+
+// Polygon visual styling
+const STYLE = {
+  // Unselected polygon
+  fill: 'rgba(196, 165, 116, 0.12)',
+  stroke: 'rgba(196, 165, 116, 0.5)',
+  strokeWidth: 0.15,
+  
+  // Selected polygon
+  selectedFill: 'rgba(245, 158, 11, 0.2)',
+  selectedStroke: 'rgba(245, 158, 11, 0.8)',
+  selectedStrokeWidth: 0.25,
+  
+  // Vertex handles (small, subtle)
+  vertexRadius: 0.6,
+  vertexHoverRadius: 0.8,
+  vertexTouchRadius: 2,
+  vertexFill: 'rgba(255, 255, 255, 0.9)',
+  vertexStroke: 'rgba(0, 0, 0, 0.5)',
+  vertexHoverFill: '#f59e0b',
+  vertexDragFill: '#fbbf24',
+  
+  // Midpoint handles (even smaller)
+  midpointRadius: 0.4,
+  midpointTouchRadius: 1.5,
+  midpointFill: 'rgba(96, 165, 250, 0.6)',
+  midpointHoverFill: '#60a5fa',
+  
+  // Drawing mode
+  drawingStroke: '#f59e0b',
+  drawingStrokeWidth: 0.2,
+  drawingPointRadius: 0.7,
+  drawingFirstPointRadius: 1,
+  drawingCloseZoneRadius: 2,
 }
 
 interface Point {
@@ -54,10 +80,7 @@ function PumpRoomSplat({ src }: { src: string }) {
   )
 }
 
-// ============================================
-// SplatScene - COMPLETELY ISOLATED with memo to prevent ANY re-renders
-// This is the key pattern from InteractiveViewer that prevents splat disappearing
-// ============================================
+// SplatScene - ISOLATED with memo
 const SplatScene = memo(function SplatScene() {
   return (
     <Application graphicsDeviceOptions={{ antialias: false }}>
@@ -140,21 +163,20 @@ function PolygonShape({
     }
   }, [draggingVertex, onVertexDrag])
   
-  // MUCH LARGER touch targets for usability
-  const VERTEX_RADIUS = 1.5
-  const VERTEX_HOVER_RADIUS = 2
-  const TOUCH_TARGET_RADIUS = 3
-  const MIDPOINT_RADIUS = 1
-  const MIDPOINT_TOUCH_RADIUS = 2.5
+  const getVertexFill = (i: number) => {
+    if (draggingVertex === i) return STYLE.vertexDragFill
+    if (hoverVertex === i) return STYLE.vertexHoverFill
+    return STYLE.vertexFill
+  }
   
   return (
     <g ref={svgRef}>
-      {/* Polygon fill */}
+      {/* Polygon fill and stroke */}
       <polygon
         points={pointsStr}
-        fill={isSelected ? 'rgba(139, 115, 85, 0.35)' : 'rgba(139, 115, 85, 0.2)'}
-        stroke={isSelected ? 'rgba(245, 158, 11, 0.9)' : 'rgba(196, 165, 116, 0.6)'}
-        strokeWidth={isSelected ? 0.5 : 0.3}
+        fill={isSelected ? STYLE.selectedFill : STYLE.fill}
+        stroke={isSelected ? STYLE.selectedStroke : STYLE.stroke}
+        strokeWidth={isSelected ? STYLE.selectedStrokeWidth : STYLE.strokeWidth}
         className="cursor-pointer"
         onClick={(e) => {
           e.stopPropagation()
@@ -162,14 +184,14 @@ function PolygonShape({
         }}
       />
       
-      {/* Vertices - only show when selected */}
+      {/* Vertices - only when selected */}
       {isSelected && points.map((p, i) => (
         <g key={`v-${i}`}>
-          {/* Invisible larger touch target */}
+          {/* Invisible touch target */}
           <circle
             cx={p.x}
             cy={p.y}
-            r={TOUCH_TARGET_RADIUS}
+            r={STYLE.vertexTouchRadius}
             fill="transparent"
             className="cursor-move"
             onMouseDown={(e) => handleVertexMouseDown(e, i)}
@@ -181,35 +203,23 @@ function PolygonShape({
           <circle
             cx={p.x}
             cy={p.y}
-            r={hoverVertex === i || draggingVertex === i ? VERTEX_HOVER_RADIUS : VERTEX_RADIUS}
-            fill={draggingVertex === i ? '#f59e0b' : hoverVertex === i ? '#fbbf24' : '#c4a574'}
-            stroke="#1a1a2e"
-            strokeWidth={0.3}
+            r={hoverVertex === i || draggingVertex === i ? STYLE.vertexHoverRadius : STYLE.vertexRadius}
+            fill={getVertexFill(i)}
+            stroke={STYLE.vertexStroke}
+            strokeWidth={0.1}
             pointerEvents="none"
           />
-          {/* Vertex number label */}
-          <text
-            x={p.x}
-            y={p.y + 0.4}
-            fontSize="1.1"
-            fill="#1a1a2e"
-            textAnchor="middle"
-            pointerEvents="none"
-            fontWeight="bold"
-          >
-            {i + 1}
-          </text>
         </g>
       ))}
       
-      {/* Midpoints - for adding new vertices */}
+      {/* Midpoints - for adding vertices */}
       {isSelected && points.length >= 3 && midpoints.map((p, i) => (
         <g key={`m-${i}`}>
-          {/* Invisible larger touch target */}
+          {/* Invisible touch target */}
           <circle
             cx={p.x}
             cy={p.y}
-            r={MIDPOINT_TOUCH_RADIUS}
+            r={STYLE.midpointTouchRadius}
             fill="transparent"
             className="cursor-crosshair"
             onClick={(e) => {
@@ -223,19 +233,10 @@ function PolygonShape({
           <circle
             cx={p.x}
             cy={p.y}
-            r={hoverMidpoint === i ? MIDPOINT_RADIUS * 1.3 : MIDPOINT_RADIUS}
-            fill={hoverMidpoint === i ? '#60a5fa' : 'rgba(96, 165, 250, 0.6)'}
-            stroke="#1a1a2e"
-            strokeWidth={0.2}
+            r={STYLE.midpointRadius}
+            fill={hoverMidpoint === i ? STYLE.midpointHoverFill : STYLE.midpointFill}
             pointerEvents="none"
           />
-          {/* Plus sign on hover */}
-          {hoverMidpoint === i && (
-            <>
-              <line x1={p.x - 0.5} y1={p.y} x2={p.x + 0.5} y2={p.y} stroke="#1a1a2e" strokeWidth={0.2} pointerEvents="none" />
-              <line x1={p.x} y1={p.y - 0.5} x2={p.x} y2={p.y + 0.5} stroke="#1a1a2e" strokeWidth={0.2} pointerEvents="none" />
-            </>
-          )}
         </g>
       ))}
     </g>
@@ -243,7 +244,7 @@ function PolygonShape({
 }
 
 // ============================================
-// Drawing Polygon (incomplete, still placing points)
+// Drawing Polygon
 // ============================================
 interface DrawingPolygonProps {
   points: Point[]
@@ -262,9 +263,9 @@ function DrawingPolygon({ points, mousePos }: DrawingPolygonProps) {
       <polyline
         points={pointsStr}
         fill="none"
-        stroke="#f59e0b"
-        strokeWidth={0.4}
-        strokeDasharray="0.8,0.4"
+        stroke={STYLE.drawingStroke}
+        strokeWidth={STYLE.drawingStrokeWidth}
+        strokeDasharray="0.5,0.3"
       />
       
       {/* Closing line preview */}
@@ -274,47 +275,37 @@ function DrawingPolygon({ points, mousePos }: DrawingPolygonProps) {
           y1={mousePos.y}
           x2={points[0].x}
           y2={points[0].y}
-          stroke="#f59e0b"
-          strokeWidth={0.25}
-          strokeDasharray="0.4,0.4"
+          stroke={STYLE.drawingStroke}
+          strokeWidth={STYLE.drawingStrokeWidth * 0.7}
+          strokeDasharray="0.3,0.3"
           opacity={0.5}
         />
       )}
       
-      {/* Placed points - LARGER */}
+      {/* Placed points */}
       {points.map((p, i) => (
-        <g key={i}>
-          <circle
-            cx={p.x}
-            cy={p.y}
-            r={i === 0 && points.length >= 3 ? 2 : 1.5}
-            fill={i === 0 ? '#22c55e' : '#f59e0b'}
-            stroke="#1a1a2e"
-            strokeWidth={0.3}
-          />
-          <text
-            x={p.x}
-            y={p.y + 0.4}
-            fontSize="1"
-            fill="#1a1a2e"
-            textAnchor="middle"
-            fontWeight="bold"
-          >
-            {i + 1}
-          </text>
-        </g>
+        <circle
+          key={i}
+          cx={p.x}
+          cy={p.y}
+          r={i === 0 && points.length >= 3 ? STYLE.drawingFirstPointRadius : STYLE.drawingPointRadius}
+          fill={i === 0 ? '#22c55e' : STYLE.drawingStroke}
+          stroke="rgba(0,0,0,0.3)"
+          strokeWidth={0.1}
+        />
       ))}
       
-      {/* First point indicator (click to close) */}
+      {/* Close zone indicator */}
       {points.length >= 3 && (
         <circle
           cx={points[0].x}
           cy={points[0].y}
-          r={3}
+          r={STYLE.drawingCloseZoneRadius}
           fill="none"
           stroke="#22c55e"
-          strokeWidth={0.3}
-          strokeDasharray="0.5,0.3"
+          strokeWidth={0.15}
+          strokeDasharray="0.4,0.3"
+          opacity={0.6}
         />
       )}
     </g>
@@ -322,7 +313,7 @@ function DrawingPolygon({ points, mousePos }: DrawingPolygonProps) {
 }
 
 // ============================================
-// SVG Overlay (sits on top of splat)
+// SVG Overlay
 // ============================================
 interface OverlayProps {
   hotspots: ParsedSplatHotspot[]
@@ -364,19 +355,19 @@ function Overlay({
     const pos = getMousePosition(e)
     
     if (mode === 'draw') {
-      // Check if clicking near first point to close (larger threshold)
+      // Check if clicking near first point to close
       if (drawingPoints.length >= 3) {
         const first = drawingPoints[0]
         const dist = Math.sqrt((pos.x - first.x) ** 2 + (pos.y - first.y) ** 2)
-        if (dist < 4) {
+        if (dist < 3) {
           onCompleteDrawing()
           return
         }
       }
       onAddDrawingPoint(pos)
-    } else {
-      onSelectHotspot(null)
     }
+    // In select mode, clicking empty space does NOT deselect
+    // User must click another hotspot or use sidebar to deselect
   }
   
   const handleDoubleClick = () => {
@@ -513,68 +504,57 @@ function Sidebar({
   }
   
   return (
-    <div className="w-80 bg-neutral-900 text-white text-sm flex flex-col">
+    <div className="w-72 bg-neutral-900 text-white text-sm flex flex-col">
       {/* Header */}
       <div className="p-3 border-b border-neutral-700">
         <Link to="/admin" className="text-amber-600 hover:text-amber-500 text-xs">
           ← Back to Admin
         </Link>
         <h1 className="text-base font-medium text-neutral-200 mt-1">Hotspot Editor</h1>
-        <p className="text-xs text-neutral-500 mt-0.5">
-          Draw polygons around equipment
-        </p>
       </div>
       
-      {/* Loading/Error States */}
+      {/* Status */}
       {loading && (
-        <div className="p-3 bg-neutral-800 text-neutral-400 text-xs">
-          Loading hotspots from database...
+        <div className="px-3 py-2 bg-neutral-800 text-neutral-400 text-xs">
+          Loading...
         </div>
       )}
       {error && (
-        <div className="p-3 bg-red-900/30 text-red-400 text-xs">
-          Error: {error}
+        <div className="px-3 py-2 bg-red-900/30 text-red-400 text-xs">
+          {error}
         </div>
       )}
       
       {/* Mode Toggle */}
       <div className="p-3 border-b border-neutral-700">
-        <div className="flex gap-2">
+        <div className="flex gap-1">
           <button
             onClick={() => onSetMode('select')}
-            className={`flex-1 py-2 rounded text-xs font-medium transition-colors
+            className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors
               ${mode === 'select' 
-                ? 'bg-amber-800 text-white' 
+                ? 'bg-amber-700 text-white' 
                 : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}
           >
-            ✋ Select / Edit
+            Edit
           </button>
           <button
             onClick={() => onSetMode('draw')}
-            className={`flex-1 py-2 rounded text-xs font-medium transition-colors
+            className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors
               ${mode === 'draw' 
-                ? 'bg-amber-800 text-white' 
+                ? 'bg-amber-700 text-white' 
                 : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}
           >
-            ✏️ Draw New
+            Draw
           </button>
         </div>
         
         {mode === 'draw' && (
-          <div className="mt-3 p-2 bg-amber-900/30 rounded text-xs border border-amber-800/50">
-            <p className="text-amber-400 font-medium">Drawing Mode</p>
-            <ul className="text-neutral-300 mt-1 space-y-0.5">
-              <li>• Click to place vertices</li>
-              <li>• Click green point (or double-click) to close</li>
-              <li>• Minimum 3 points required</li>
-            </ul>
+          <div className="mt-2 text-[10px] text-neutral-500">
+            Click to place points. Double-click or click start point to close.
             {drawingPoints.length > 0 && (
-              <div className="mt-2 flex items-center justify-between pt-2 border-t border-amber-800/30">
-                <span className="text-amber-300">{drawingPoints.length} point{drawingPoints.length !== 1 ? 's' : ''} placed</span>
-                <button
-                  onClick={onCancelDrawing}
-                  className="text-red-400 hover:text-red-300 font-medium"
-                >
+              <div className="mt-1 flex items-center justify-between text-neutral-400">
+                <span>{drawingPoints.length} points</span>
+                <button onClick={onCancelDrawing} className="text-red-400 hover:text-red-300">
                   Cancel
                 </button>
               </div>
@@ -583,16 +563,15 @@ function Sidebar({
         )}
       </div>
       
-      {/* New Hotspot Name (shown when drawing has 3+ points) */}
+      {/* New Hotspot Name */}
       {mode === 'draw' && drawingPoints.length >= 3 && (
         <div className="p-3 border-b border-neutral-700 bg-green-900/20">
-          <label className="text-xs text-neutral-300 block mb-1">Name this hotspot:</label>
           <input
             type="text"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            placeholder="e.g. Main Steam Engine"
-            className="w-full bg-neutral-800 border border-neutral-600 rounded px-2 py-2 text-sm
+            placeholder="Hotspot name..."
+            className="w-full bg-neutral-800 border border-neutral-600 rounded px-2 py-1.5 text-xs
                       focus:border-green-500 focus:outline-none"
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
             autoFocus
@@ -601,127 +580,106 @@ function Sidebar({
             onClick={handleCreate}
             disabled={!newName.trim()}
             className="w-full mt-2 bg-green-700 hover:bg-green-600 disabled:bg-neutral-700
-                      disabled:text-neutral-500 py-2 rounded text-xs font-medium transition-colors"
+                      disabled:text-neutral-500 py-1.5 rounded text-xs font-medium"
           >
-            ✓ Save Hotspot
+            Save
           </button>
         </div>
       )}
       
-      {/* Selected Hotspot Details */}
+      {/* Selected Hotspot */}
       {mode === 'select' && selectedHotspot && (
-        <div className="p-3 border-b border-neutral-700 bg-amber-900/20">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-amber-400 font-medium">Selected Hotspot</span>
-          </div>
-          <div className="bg-neutral-800 rounded p-2">
-            <p className="text-neutral-200 font-medium">{selectedHotspot.name_en}</p>
-            {selectedHotspot.name_fr && (
-              <p className="text-neutral-400 text-xs mt-0.5">{selectedHotspot.name_fr}</p>
-            )}
-            <p className="text-neutral-600 text-[10px] mt-1 font-mono">
-              {selectedHotspot.slug}
-            </p>
-          </div>
+        <div className="p-3 border-b border-neutral-700 bg-amber-900/10">
+          <div className="text-xs text-amber-500 mb-1">Selected</div>
+          <div className="text-neutral-200 font-medium text-sm">{selectedHotspot.name_en}</div>
+          <div className="text-neutral-600 text-[10px] font-mono mt-0.5">{selectedHotspot.slug}</div>
           
-          <div className="mt-2 text-[10px] text-neutral-400 space-y-0.5">
-            <p>• Drag gold circles to move vertices</p>
-            <p>• Click blue dots to add vertices</p>
-            <p>• Right-click vertex to delete</p>
+          <div className="mt-2 text-[10px] text-neutral-500">
+            Drag handles to edit. Right-click to delete vertex.
           </div>
           
           {selectedHotspot.shape === 'polygon' && (
-            <p className="mt-2 text-xs text-neutral-500">
+            <div className="mt-1 text-[10px] text-neutral-600">
               {(selectedHotspot.bounds as PolygonBounds).points.length} vertices
-            </p>
+            </div>
           )}
           
-          {/* Delete Button with Confirmation */}
+          {/* Delete */}
           {confirmDelete === selectedHotspot.id ? (
-            <div className="mt-3 p-2 bg-red-900/30 rounded border border-red-800">
-              <p className="text-red-300 text-xs mb-2">Delete "{selectedHotspot.name_en}"?</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleDelete(selectedHotspot.id)}
-                  className="flex-1 bg-red-700 hover:bg-red-600 py-1.5 rounded text-xs font-medium"
-                >
-                  Yes, Delete
-                </button>
-                <button
-                  onClick={() => setConfirmDelete(null)}
-                  className="flex-1 bg-neutral-700 hover:bg-neutral-600 py-1.5 rounded text-xs"
-                >
-                  Cancel
-                </button>
-              </div>
+            <div className="mt-2 flex gap-1">
+              <button
+                onClick={() => handleDelete(selectedHotspot.id)}
+                className="flex-1 bg-red-700 hover:bg-red-600 py-1 rounded text-[10px]"
+              >
+                Confirm
+              </button>
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="flex-1 bg-neutral-700 hover:bg-neutral-600 py-1 rounded text-[10px]"
+              >
+                Cancel
+              </button>
             </div>
           ) : (
             <button
               onClick={() => setConfirmDelete(selectedHotspot.id)}
-              className="w-full mt-3 bg-red-900/50 hover:bg-red-800/50 border border-red-800/50 
-                        text-red-300 py-1.5 rounded text-xs font-medium transition-colors"
+              className="w-full mt-2 text-red-400 hover:text-red-300 text-[10px] text-left"
             >
-              🗑️ Delete Hotspot
+              Delete hotspot
             </button>
           )}
+          
+          {/* Deselect */}
+          <button
+            onClick={() => onSelectHotspot(null)}
+            className="w-full mt-1 text-neutral-500 hover:text-neutral-400 text-[10px] text-left"
+          >
+            Deselect
+          </button>
         </div>
       )}
       
       {/* Hotspot List */}
       <div className="flex-1 overflow-y-auto p-3">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-neutral-400">
-            All Hotspots ({hotspots.length})
+          <span className="text-[10px] text-neutral-500 uppercase tracking-wide">
+            Hotspots ({hotspots.length})
           </span>
           {saving && (
-            <span className="text-xs text-amber-500 animate-pulse">Saving...</span>
+            <span className="text-[10px] text-amber-500">Saving...</span>
           )}
         </div>
         
-        <div className="space-y-1">
+        <div className="space-y-0.5">
           {hotspots.map(h => (
             <button
               key={h.id}
               onClick={() => onSelectHotspot(h.id)}
-              className={`w-full text-left px-2 py-2 rounded text-xs transition-colors
+              className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors
                 ${selectedId === h.id
-                  ? 'bg-amber-900/50 border border-amber-700'
-                  : 'bg-neutral-800 border border-neutral-700 hover:border-neutral-600'}`}
+                  ? 'bg-amber-900/40 text-amber-100'
+                  : 'text-neutral-300 hover:bg-neutral-800'}`}
             >
               <div className="flex items-center justify-between">
-                <span className="text-neutral-200 font-medium">{h.name_en}</span>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded
-                  ${h.viewpoint_position 
-                    ? 'bg-green-900/50 text-green-400' 
-                    : 'bg-neutral-700 text-neutral-500'}`}
-                >
-                  {h.viewpoint_position ? '📷 ✓' : 'no cam'}
-                </span>
-              </div>
-              <div className="text-neutral-500 font-mono text-[10px] mt-0.5">
-                {h.shape === 'polygon' 
-                  ? `${(h.bounds as PolygonBounds).points.length} vertices`
-                  : h.shape}
+                <span>{h.name_en}</span>
+                {h.viewpoint_position && (
+                  <span className="text-green-500 text-[10px]">📷</span>
+                )}
               </div>
             </button>
           ))}
         </div>
         
         {hotspots.length === 0 && !loading && (
-          <p className="text-neutral-600 text-xs text-center py-8">
-            No hotspots yet.<br />
-            Switch to Draw mode to create one.
+          <p className="text-neutral-600 text-xs text-center py-4">
+            No hotspots. Use Draw mode.
           </p>
         )}
       </div>
       
       {/* Footer */}
-      <div className="p-3 border-t border-neutral-700 text-[10px] text-neutral-600">
-        {configId ? (
-          <span>Config: {configId.slice(0, 8)}...</span>
-        ) : (
-          <span className="text-red-400">No config loaded</span>
-        )}
+      <div className="p-2 border-t border-neutral-800 text-[10px] text-neutral-600">
+        {configId ? `Config: ${configId.slice(0, 8)}` : 'No config'}
       </div>
     </div>
   )
@@ -729,23 +687,19 @@ function Sidebar({
 
 // ============================================
 // Main Component
-// IMPORTANT: SplatScene is rendered unconditionally to prevent unmounting
 // ============================================
 export default function HotspotEditor() {
-  // Data from Supabase
   const { config, hotspots, loading, error, saveHotspotBounds } = useSplatData()
   
-  // Local UI state
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [mode, setMode] = useState<EditorMode>('select')
   const [drawingPoints, setDrawingPoints] = useState<Point[]>([])
   const [mousePos, setMousePos] = useState<Point | null>(null)
   const [saving, setSaving] = useState(false)
   
-  // Local copy of hotspots for optimistic updates
+  // Local hotspots for optimistic updates
   const [localHotspots, setLocalHotspots] = useState<ParsedSplatHotspot[]>([])
   
-  // Sync from loaded data
   useEffect(() => {
     setLocalHotspots(hotspots)
   }, [hotspots])
@@ -772,15 +726,13 @@ export default function HotspotEditor() {
   }
   
   const handleCompleteDrawing = () => {
-    // Drawing is "complete" - user now needs to enter name in sidebar
-    // Points stay visible so user can see what they drew
+    // Points stay visible, user enters name in sidebar
   }
   
   const handleCreateHotspot = async (name: string) => {
     if (!config || drawingPoints.length < 3) return
     
     setSaving(true)
-    
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
     
     const newHotspot = await createHotspot({
@@ -814,26 +766,22 @@ export default function HotspotEditor() {
   }
   
   const handleUpdateBounds = async (id: string, bounds: PolygonBounds) => {
-    // Optimistic local update
+    // Optimistic update
     setLocalHotspots(prev => prev.map(h => 
       h.id === id ? { ...h, bounds } : h
     ))
     
-    // Save to database
+    // Save to DB
     setSaving(true)
     await saveHotspotBounds(id, 'polygon', bounds)
     setSaving(false)
   }
   
-  // CRITICAL: Always render SplatScene - never conditionally unmount it
-  // Loading/error states are shown in sidebar only
   return (
     <div className="w-screen h-screen bg-black flex">
-      {/* Splat Viewer - ALWAYS RENDERED, never unmounted */}
+      {/* Splat Viewer */}
       <div className="flex-1 relative">
         <SplatScene />
-        
-        {/* SVG Overlay for drawing/editing polygons */}
         <Overlay
           hotspots={localHotspots.filter(h => h.shape === 'polygon')}
           selectedId={selectedId}
@@ -848,7 +796,7 @@ export default function HotspotEditor() {
         />
       </div>
       
-      {/* Sidebar - shows loading/error states here instead of blocking splat */}
+      {/* Sidebar */}
       <Sidebar
         hotspots={localHotspots}
         selectedId={selectedId}
