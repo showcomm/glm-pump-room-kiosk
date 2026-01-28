@@ -7,6 +7,9 @@
  * 
  * These settings are interdependent - the overview camera should be captured
  * at the target aspect ratio so hotspots align correctly.
+ * 
+ * CRITICAL: PlayCanvas Application components must have STATIC props.
+ * Camera position is set imperatively via PlayCanvas API, not React props.
  */
 
 import React, { useState, useEffect, useRef, memo } from 'react'
@@ -21,12 +24,12 @@ import { updateSplatConfig } from '../../lib/api/splat'
 import { RESOLUTION_PRESETS } from '../../lib/database.types'
 
 // ============================================
-// CONFIGURATION
+// CONFIGURATION - STATIC VALUES ONLY
 // ============================================
 const SPLAT_URL = '/pump-room.ply'
 
-// Fallback camera if no config loaded yet
-const DEFAULT_CAMERA = {
+// STATIC camera starting position - NEVER passed as changing props
+const STATIC_CAMERA = {
   position: [0, 2, 5] as [number, number, number],
   rotation: [0, 0, 0] as [number, number, number],
   fov: 60
@@ -102,7 +105,7 @@ function AspectRatioContainer({
 }
 
 // ============================================
-// Splat Components
+// Splat Components - COMPLETELY STATIC
 // ============================================
 function PumpRoomSplat({ src }: { src: string }) {
   const { asset, loading, error } = useSplat(src)
@@ -114,25 +117,47 @@ function PumpRoomSplat({ src }: { src: string }) {
   )
 }
 
-// Camera with orbit controls for capturing position
-interface CameraEntityProps {
-  initialPosition: [number, number, number]
-  initialRotation: [number, number, number]
-  fov: number
-}
-
-const CameraEntity = memo(function CameraEntity({ 
-  initialPosition, 
-  initialRotation, 
-  fov 
-}: CameraEntityProps) {
+// CRITICAL: NO PROPS - uses module-level constants only
+const CameraEntity = memo(function CameraEntity() {
   return (
-    <Entity name="camera" position={initialPosition} rotation={initialRotation}>
-      <Camera clearColor="#1a1a2e" fov={fov} farClip={1000} nearClip={0.01} />
+    <Entity name="camera" position={STATIC_CAMERA.position} rotation={STATIC_CAMERA.rotation}>
+      <Camera clearColor="#1a1a2e" fov={STATIC_CAMERA.fov} farClip={1000} nearClip={0.01} />
       <Script script={CameraControls} />
     </Entity>
   )
 })
+
+// Sets camera position imperatively after config loads
+function CameraInitializer({ 
+  position, 
+  rotation 
+}: { 
+  position: [number, number, number] | null
+  rotation: [number, number, number] | null 
+}) {
+  const app = useApp()
+  const hasInitialized = useRef(false)
+  
+  useEffect(() => {
+    if (!app || hasInitialized.current) return
+    if (!position || !rotation) return
+    
+    // Small delay to ensure camera entity exists
+    const timer = setTimeout(() => {
+      const cam = app.root.findByName('camera')
+      if (cam) {
+        cam.setLocalPosition(position[0], position[1], position[2])
+        cam.setLocalEulerAngles(rotation[0], rotation[1], rotation[2])
+        hasInitialized.current = true
+        console.log('Camera initialized to:', position, rotation)
+      }
+    }, 100)
+    
+    return () => clearTimeout(timer)
+  }, [app, position, rotation])
+  
+  return null
+}
 
 // Component that broadcasts camera position
 function CameraBroadcaster() {
@@ -283,7 +308,7 @@ function CameraDisplay({ position, rotation, fov, onFovChange }: CameraDisplayPr
       </div>
       
       <div>
-        <label className="block text-xs text-neutral-500 mb-1">Field of View</label>
+        <label className="block text-xs text-neutral-500 mb-1">Field of View (saved value)</label>
         <div className="flex items-center gap-2">
           <input
             type="range"
@@ -295,6 +320,9 @@ function CameraDisplay({ position, rotation, fov, onFovChange }: CameraDisplayPr
           />
           <span className="text-sm text-amber-400 w-10 text-right">{fov}°</span>
         </div>
+        <p className="text-[9px] text-neutral-600 mt-1">
+          Note: FOV changes apply on save, not live preview
+        </p>
       </div>
       
       <p className="text-[10px] text-neutral-600">
@@ -313,15 +341,18 @@ export default function DisplaySettings() {
   // Local state for editing
   const [targetWidth, setTargetWidth] = useState(1920)
   const [targetHeight, setTargetHeight] = useState(1080)
-  const [cameraPosition, setCameraPosition] = useState<[number, number, number]>(DEFAULT_CAMERA.position)
-  const [cameraRotation, setCameraRotation] = useState<[number, number, number]>(DEFAULT_CAMERA.rotation)
-  const [cameraFov, setCameraFov] = useState(DEFAULT_CAMERA.fov)
+  const [cameraPosition, setCameraPosition] = useState<[number, number, number]>(STATIC_CAMERA.position)
+  const [cameraRotation, setCameraRotation] = useState<[number, number, number]>(STATIC_CAMERA.rotation)
+  const [cameraFov, setCameraFov] = useState(STATIC_CAMERA.fov)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [dirty, setDirty] = useState(false)
   
-  // Track initial values for camera (for the viewer)
-  const [initialCamera, setInitialCamera] = useState(DEFAULT_CAMERA)
+  // Config values for camera initialization (only set once)
+  const [configCamera, setConfigCamera] = useState<{
+    position: [number, number, number] | null
+    rotation: [number, number, number] | null
+  }>({ position: null, rotation: null })
   
   // Load config values
   useEffect(() => {
@@ -336,7 +367,9 @@ export default function DisplaySettings() {
       setCameraPosition(pos)
       setCameraRotation(rot)
       setCameraFov(fov)
-      setInitialCamera({ position: pos, rotation: rot, fov })
+      
+      // Set config camera for initialization (only once)
+      setConfigCamera({ position: pos, rotation: rot })
     }
   }, [config])
   
@@ -404,10 +437,10 @@ export default function DisplaySettings() {
       <div className="flex-1 relative bg-neutral-950">
         <AspectRatioContainer width={targetWidth} height={targetHeight}>
           <Application graphicsDeviceOptions={{ antialias: false }}>
-            <CameraEntity 
-              initialPosition={initialCamera.position}
-              initialRotation={initialCamera.rotation}
-              fov={cameraFov}
+            <CameraEntity />
+            <CameraInitializer 
+              position={configCamera.position}
+              rotation={configCamera.rotation}
             />
             <PumpRoomSplat src={SPLAT_URL} />
             <CameraBroadcaster />
