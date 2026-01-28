@@ -4,7 +4,7 @@
  * CRITICAL: PlayCanvas Application must be COMPLETELY ISOLATED from React state.
  * The SplatScene component is memoized and has NO props that change.
  * 
- * ASPECT RATIO: Locked to kiosk resolution (16:9) so hotspot coordinates
+ * ASPECT RATIO: Reads from config's target_width/height so hotspot coordinates
  * match between admin editor and deployed kiosk regardless of browser size.
  */
 
@@ -14,7 +14,7 @@ import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat } from '@playcanvas/react/components'
 import { useSplat } from '@playcanvas/react/hooks'
 import { useSplatData } from '../../hooks/useSplatData'
-import type { ParsedSplatHotspot, PolygonBounds } from '../../lib/database.types'
+import type { ParsedSplatHotspot, PolygonBounds, SplatConfig } from '../../lib/database.types'
 import { createHotspot, deleteHotspot } from '../../lib/api/splat'
 
 // ============================================
@@ -22,13 +22,13 @@ import { createHotspot, deleteHotspot } from '../../lib/api/splat'
 // ============================================
 const SPLAT_URL = '/pump-room.ply'
 
-// Kiosk display: Beetronic 24" HD = 1920x1080 (16:9)
-const KIOSK_ASPECT_RATIO = 16 / 9
-
-const OVERVIEW = {
-  position: [-0.005, -6.86, 0.296] as [number, number, number],
-  rotation: [87.53, -0.96, 0] as [number, number, number],
-  fov: 60
+// Fallback values if config not loaded
+const DEFAULT_CONFIG = {
+  target_width: 1920,
+  target_height: 1080,
+  overview_position: [-0.005, -6.86, 0.296] as [number, number, number],
+  overview_rotation: [87.53, -0.96, 0] as [number, number, number],
+  overview_fov: 60
 }
 
 // Default polygon styling
@@ -54,14 +54,17 @@ type EditorMode = 'select' | 'draw'
 // Maintains exact kiosk aspect ratio with letterboxing
 // ============================================
 function AspectRatioContainer({ 
-  aspectRatio, 
+  width,
+  height,
   children 
 }: { 
-  aspectRatio: number
+  width: number
+  height: number
   children: React.ReactNode 
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
+  const aspectRatio = width / height
   
   useEffect(() => {
     const updateDimensions = () => {
@@ -74,19 +77,17 @@ function AspectRatioContainer({
       const parentHeight = parent.clientHeight
       const parentRatio = parentWidth / parentHeight
       
-      let width: number, height: number
+      let w: number, h: number
       
       if (parentRatio > aspectRatio) {
-        // Parent is wider than target - fit to height, letterbox sides
-        height = parentHeight
-        width = height * aspectRatio
+        h = parentHeight
+        w = h * aspectRatio
       } else {
-        // Parent is taller than target - fit to width, letterbox top/bottom
-        width = parentWidth
-        height = width / aspectRatio
+        w = parentWidth
+        h = w / aspectRatio
       }
       
-      setDimensions({ width, height })
+      setDimensions({ width: w, height: h })
     }
     
     updateDimensions()
@@ -130,11 +131,17 @@ function PumpRoomSplat({ src }: { src: string }) {
   )
 }
 
-const SplatScene = memo(function SplatScene() {
+interface SplatSceneProps {
+  position: [number, number, number]
+  rotation: [number, number, number]
+  fov: number
+}
+
+const SplatScene = memo(function SplatScene({ position, rotation, fov }: SplatSceneProps) {
   return (
     <Application graphicsDeviceOptions={{ antialias: false }}>
-      <Entity name="camera" position={OVERVIEW.position} rotation={OVERVIEW.rotation}>
-        <Camera clearColor="#1a1a2e" fov={OVERVIEW.fov} farClip={1000} nearClip={0.01} />
+      <Entity name="camera" position={position} rotation={rotation}>
+        <Camera clearColor="#1a1a2e" fov={fov} farClip={1000} nearClip={0.01} />
       </Entity>
       <PumpRoomSplat src={SPLAT_URL} />
     </Application>
@@ -561,7 +568,7 @@ interface SidebarProps {
   drawingPoints: Point[]
   onCancelDrawing: () => void
   saving: boolean
-  configId: string | null
+  config: SplatConfig | null
   loading: boolean
   error: string | null
   style: typeof DEFAULT_STYLE
@@ -579,7 +586,7 @@ function Sidebar({
   drawingPoints,
   onCancelDrawing,
   saving,
-  configId,
+  config,
   loading,
   error,
   style,
@@ -590,6 +597,11 @@ function Sidebar({
   const [showStyle, setShowStyle] = useState(false)
   
   const selectedHotspot = hotspots.find(h => h.id === selectedId)
+  
+  // Format resolution display
+  const targetWidth = config?.target_width || DEFAULT_CONFIG.target_width
+  const targetHeight = config?.target_height || DEFAULT_CONFIG.target_height
+  const resolutionLabel = `${targetWidth}×${targetHeight}`
   
   const handleCreate = () => {
     if (newName.trim()) {
@@ -606,7 +618,12 @@ function Sidebar({
           ← Admin
         </Link>
         <h1 className="text-sm font-medium text-neutral-200 mt-0.5">Hotspot Editor</h1>
-        <p className="text-[9px] text-neutral-600 mt-0.5">16:9 aspect ratio locked</p>
+        <p className="text-[9px] text-neutral-600 mt-0.5">
+          {resolutionLabel} locked
+          <Link to="/admin/display-settings" className="ml-2 text-amber-700 hover:text-amber-600">
+            Change
+          </Link>
+        </p>
       </div>
       
       {loading && <div className="p-2 bg-neutral-800 text-neutral-400 text-[10px]">Loading...</div>}
@@ -726,7 +743,7 @@ function Sidebar({
       
       {/* Footer */}
       <div className="p-2 border-t border-neutral-800 text-[9px] text-neutral-700">
-        <div>{configId ? `Config: ${configId.slice(0,8)}` : <span className="text-red-400">No config</span>}</div>
+        <div>{config?.id ? `Config: ${config.id.slice(0,8)}` : <span className="text-red-400">No config</span>}</div>
       </div>
     </div>
   )
@@ -752,6 +769,13 @@ export default function HotspotEditor() {
   useEffect(() => {
     setLocalHotspots(hotspots)
   }, [hotspots])
+  
+  // Get config values or defaults
+  const targetWidth = config?.target_width || DEFAULT_CONFIG.target_width
+  const targetHeight = config?.target_height || DEFAULT_CONFIG.target_height
+  const overviewPosition = (config?.overview_position as [number, number, number]) || DEFAULT_CONFIG.overview_position
+  const overviewRotation = (config?.overview_rotation as [number, number, number]) || DEFAULT_CONFIG.overview_rotation
+  const overviewFov = config?.overview_fov || DEFAULT_CONFIG.overview_fov
   
   const handleSelectHotspot = (id: string | null) => {
     setSelectedId(id)
@@ -818,10 +842,14 @@ export default function HotspotEditor() {
   
   return (
     <div className="w-screen h-screen bg-black flex">
-      {/* Viewer area with fixed aspect ratio */}
+      {/* Viewer area with fixed aspect ratio from config */}
       <div className="flex-1 relative bg-neutral-950">
-        <AspectRatioContainer aspectRatio={KIOSK_ASPECT_RATIO}>
-          <SplatScene />
+        <AspectRatioContainer width={targetWidth} height={targetHeight}>
+          <SplatScene 
+            position={overviewPosition}
+            rotation={overviewRotation}
+            fov={overviewFov}
+          />
           <Overlay
             hotspots={localHotspots.filter(h => h.shape === 'polygon')}
             selectedId={selectedId}
@@ -849,7 +877,7 @@ export default function HotspotEditor() {
         drawingPoints={drawingPoints}
         onCancelDrawing={() => setDrawingPoints([])}
         saving={saving}
-        configId={config?.id || null}
+        config={config}
         loading={loading}
         error={error}
         style={style}
