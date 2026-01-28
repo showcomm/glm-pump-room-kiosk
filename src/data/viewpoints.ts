@@ -4,9 +4,14 @@
  * Each viewpoint defines where the camera should position when viewing equipment.
  * The 'overview' viewpoint is the default/home position.
  * 
- * IMPORTANT: These are PLACEHOLDER values. You'll need to capture real positions
- * using the admin capture tool once it's working. For now, these provide structure
- * for testing the transition system.
+ * HOW TO CAPTURE REAL POSITIONS:
+ * 1. Run the app and triple-tap the top-left corner to enter Admin Mode
+ * 2. Use orbit controls to navigate to a good viewpoint for each equipment
+ * 3. Click "Copy to Clipboard" to get the position/rotation values
+ * 4. Paste the values into this file
+ * 
+ * CURRENT STATE: Equipment viewpoints use slight zoom variations of the overview
+ * position so we can test the transition mechanics. Replace with real positions.
  */
 
 export interface CameraViewpoint {
@@ -21,12 +26,16 @@ export interface CameraViewpoint {
   }
 }
 
+// Known working overview position from your splat
+const OVERVIEW_POSITION: [number, number, number] = [-0.005, -6.86, 0.296]
+const OVERVIEW_ROTATION: [number, number, number] = [87.53, -0.96, 0]
+
 export const viewpoints: CameraViewpoint[] = [
   {
     id: 'overview',
     equipment_id: null,
-    position: [-0.005, -6.86, 0.296],
-    rotation: [87.53, -0.96, 0],
+    position: OVERVIEW_POSITION,
+    rotation: OVERVIEW_ROTATION,
     fov: 60,
     label: {
       en: 'Pump Room Overview',
@@ -36,10 +45,10 @@ export const viewpoints: CameraViewpoint[] = [
   {
     id: 'main-pump-east-view',
     equipment_id: 'main-pump-east',
-    // PLACEHOLDER - capture real position
-    position: [-1.5, -4.0, 0.5],
-    rotation: [75, -15, 0],
-    fov: 55,
+    // TEMP: Zoom in slightly (move Y closer, tighter FOV)
+    position: [-0.005, -5.0, 0.296],
+    rotation: [87.53, -0.96, 0],
+    fov: 45,
     label: {
       en: 'East Centrifugal Pump',
       fr: 'Pompe centrifuge Est'
@@ -48,10 +57,10 @@ export const viewpoints: CameraViewpoint[] = [
   {
     id: 'main-pump-west-view',
     equipment_id: 'main-pump-west',
-    // PLACEHOLDER - capture real position
-    position: [1.5, -4.0, 0.5],
-    rotation: [75, 15, 0],
-    fov: 55,
+    // TEMP: Zoom in slightly
+    position: [-0.005, -4.5, 0.296],
+    rotation: [87.53, -0.96, 0],
+    fov: 42,
     label: {
       en: 'West Centrifugal Pump',
       fr: 'Pompe centrifuge Ouest'
@@ -60,10 +69,10 @@ export const viewpoints: CameraViewpoint[] = [
   {
     id: 'main-engine-east-view',
     equipment_id: 'main-engine-east',
-    // PLACEHOLDER - capture real position
-    position: [-2.0, -3.5, 1.0],
-    rotation: [60, -20, 0],
-    fov: 50,
+    // TEMP: Zoom in more
+    position: [-0.005, -4.0, 0.296],
+    rotation: [87.53, -0.96, 0],
+    fov: 40,
     label: {
       en: 'East Steam Engine',
       fr: 'Moteur à vapeur Est'
@@ -72,10 +81,10 @@ export const viewpoints: CameraViewpoint[] = [
   {
     id: 'main-engine-west-view',
     equipment_id: 'main-engine-west',
-    // PLACEHOLDER - capture real position  
-    position: [2.0, -3.5, 1.0],
-    rotation: [60, 20, 0],
-    fov: 50,
+    // TEMP: Zoom in more
+    position: [-0.005, -3.5, 0.296],
+    rotation: [87.53, -0.96, 0],
+    fov: 38,
     label: {
       en: 'West Steam Engine',
       fr: 'Moteur à vapeur Ouest'
@@ -84,13 +93,49 @@ export const viewpoints: CameraViewpoint[] = [
   {
     id: 'auxiliary-pump-view',
     equipment_id: 'auxiliary-pump',
-    // PLACEHOLDER - capture real position
-    position: [-3.0, -2.5, 0.8],
-    rotation: [50, -30, 0],
-    fov: 55,
+    // TEMP: Zoom in slightly
+    position: [-0.005, -5.5, 0.296],
+    rotation: [87.53, -0.96, 0],
+    fov: 48,
     label: {
       en: 'Auxiliary Pump',
       fr: 'Pompe auxiliaire'
+    }
+  },
+  {
+    id: 'warm-water-tank-view',
+    equipment_id: 'warm-water-tank',
+    // TEMP: Zoom in slightly
+    position: [-0.005, -5.2, 0.296],
+    rotation: [87.53, -0.96, 0],
+    fov: 50,
+    label: {
+      en: 'Warm Water Tank',
+      fr: 'Réservoir d\'eau chaude'
+    }
+  },
+  {
+    id: 'steam-piping-view',
+    equipment_id: 'steam-piping',
+    // TEMP: Zoom in slightly
+    position: [-0.005, -4.8, 0.296],
+    rotation: [87.53, -0.96, 0],
+    fov: 46,
+    label: {
+      en: 'Steam Supply Lines',
+      fr: 'Conduites de vapeur'
+    }
+  },
+  {
+    id: 'discharge-piping-view',
+    equipment_id: 'discharge-piping',
+    // TEMP: Zoom in slightly
+    position: [-0.005, -5.0, 0.296],
+    rotation: [87.53, -0.96, 0],
+    fov: 44,
+    label: {
+      en: 'Discharge Pipes',
+      fr: 'Tuyaux de refoulement'
     }
   }
 ]
