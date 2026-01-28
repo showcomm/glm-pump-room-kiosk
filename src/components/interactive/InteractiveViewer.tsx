@@ -19,11 +19,9 @@ import { Camera, GSplat } from '@playcanvas/react/components'
 import { useSplat, useApp } from '@playcanvas/react/hooks'
 import { useKioskStore, checkIdleTimeout } from '../../store/kioskStore'
 import { useSplatData } from '../../hooks/useSplatData'
-import { HotspotOverlay } from './HotspotOverlay'
 import { InfoPanel } from './InfoPanel'
 import { NavigationBar } from './NavigationBar'
 import { IdleOverlay } from './IdleOverlay'
-import { FrameOverlay } from './FrameOverlay'
 import { getOverviewViewpoint } from '../../data/viewpoints'
 
 // ============================================
@@ -300,9 +298,9 @@ function ConstrainedHotspotOverlay({ bounds, frameWidth }: ConstrainedHotspotOve
   // Don't show hotspots during transitions or when equipment is selected
   const showHotspots = !isTransitioning && !selectedEquipmentId
   
-  const handleHotspotClick = (hotspotId: string) => {
+  const handleHotspotClick = (hotspotSlug: string) => {
     if (!isTransitioning) {
-      navigateToEquipment(hotspotId)
+      navigateToEquipment(hotspotSlug)
     }
   }
   
