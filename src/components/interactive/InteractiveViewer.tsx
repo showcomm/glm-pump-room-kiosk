@@ -23,6 +23,7 @@ import { InfoPanel } from './InfoPanel'
 import { NavigationBar } from './NavigationBar'
 import { IdleOverlay } from './IdleOverlay'
 import { getOverviewViewpoint } from '../../data/viewpoints'
+import type { PolygonBounds } from '../../lib/database.types'
 
 // ============================================
 // CONFIGURATION
@@ -33,8 +34,48 @@ const DEFAULT_TARGET_WIDTH = 1920
 const DEFAULT_TARGET_HEIGHT = 1080
 const TRANSITION_DURATION_MS = 1200
 
+// Default hotspot style - matches HotspotEditor
+const DEFAULT_STYLE = {
+  fillColor: '#8b7355',
+  fillOpacity: 0.15,
+  strokeColor: '#c4a574',
+  strokeWidth: 0.4
+}
+
+type HotspotStyle = typeof DEFAULT_STYLE
+
 // Static initial position - these props NEVER change
 const INITIAL = getOverviewViewpoint()
+
+// ============================================
+// Helper Functions
+// ============================================
+function darkenColor(hex: string, factor: number = 0.4): string {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgb(${Math.round(r * factor)}, ${Math.round(g * factor)}, ${Math.round(b * factor)})`
+}
+
+function lightenColor(hex: string, factor: number = 0.3): string {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgb(${Math.min(255, Math.round(r + (255 - r) * factor))}, ${Math.min(255, Math.round(g + (255 - g) * factor))}, ${Math.min(255, Math.round(b + (255 - b) * factor))})`
+}
+
+// Extract style from config settings (same as HotspotEditor)
+function getStyleFromConfig(config: { settings?: unknown } | null): HotspotStyle {
+  if (!config?.settings) return DEFAULT_STYLE
+  const settings = config.settings as Record<string, unknown>
+  const stored = settings.hotspot_style as HotspotStyle | undefined
+  if (stored?.fillColor && stored?.strokeColor && 
+      typeof stored?.fillOpacity === 'number' && 
+      typeof stored?.strokeWidth === 'number') {
+    return stored
+  }
+  return DEFAULT_STYLE
+}
 
 // ============================================
 // Types
@@ -283,9 +324,10 @@ function LetterboxOverlay({ bounds }: { bounds: ViewportBounds }) {
 interface ConstrainedHotspotOverlayProps {
   bounds: ViewportBounds
   frameWidth: number
+  style: HotspotStyle
 }
 
-function ConstrainedHotspotOverlay({ bounds, frameWidth }: ConstrainedHotspotOverlayProps) {
+function ConstrainedHotspotOverlay({ bounds, frameWidth, style }: ConstrainedHotspotOverlayProps) {
   const { 
     navigateToEquipment, 
     selectedHotspotSlug,
@@ -313,6 +355,17 @@ function ConstrainedHotspotOverlay({ bounds, frameWidth }: ConstrainedHotspotOve
   const innerWidth = bounds.width - frameWidth * 2
   const innerHeight = bounds.height - frameWidth * 2
   
+  // Style calculations (non-selected state, matching HotspotEditor)
+  const fillOpacity = style.fillOpacity
+  const mainStrokeColor = style.strokeColor
+  const shadowStrokeColor = darkenColor(style.strokeColor, 0.3)
+  const highlightStrokeColor = lightenColor(style.strokeColor, 0.4)
+  
+  // Stroke widths - shadow is thicker, main stroke on top
+  const shadowWidth = style.strokeWidth * 2.5
+  const mainWidth = style.strokeWidth * 1.2
+  const highlightWidth = style.strokeWidth * 0.6
+  
   return (
     <div 
       className="absolute pointer-events-none z-10"
@@ -328,75 +381,122 @@ function ConstrainedHotspotOverlay({ bounds, frameWidth }: ConstrainedHotspotOve
         viewBox="0 0 100 100"
         preserveAspectRatio="none"
       >
-        <style>{`
-          .hotspot-shape {
-            fill: rgba(139, 115, 85, 0.0);
-            stroke: rgba(196, 165, 116, 0.0);
-            stroke-width: 0.3;
-            cursor: pointer;
-            pointer-events: auto;
-            transition: all 0.3s ease;
-          }
-          .hotspot-shape:hover {
-            fill: rgba(139, 115, 85, 0.3);
-            stroke: rgba(196, 165, 116, 0.8);
-            stroke-width: 0.5;
-          }
-          .hotspot-shape.pulse {
-            animation: hotspot-pulse 2s ease-in-out infinite;
-          }
-          @keyframes hotspot-pulse {
-            0%, 100% { 
-              fill: rgba(139, 115, 85, 0.0);
-              stroke: rgba(196, 165, 116, 0.3);
-            }
-            50% { 
-              fill: rgba(139, 115, 85, 0.15);
-              stroke: rgba(196, 165, 116, 0.6);
-            }
-          }
-        `}</style>
+        {/* SVG Filter Definitions */}
+        <defs>
+          <filter id="glow-visitor" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="0.8" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
         
         {showHotspots && hotspots.map(hotspot => {
           if (!hotspot.active) return null
           
           const boundsData = hotspot.bounds
           
-          // Render based on shape type
+          // Render based on shape type - POLYGON only (multi-layer rendering)
           if (hotspot.shape === 'polygon' && 'points' in boundsData) {
-            const points = boundsData.points.map(p => `${p.x},${p.y}`).join(' ')
+            const points = (boundsData as PolygonBounds).points.map(p => `${p.x},${p.y}`).join(' ')
+            
             return (
-              <polygon
-                key={hotspot.id}
-                points={points}
-                className="hotspot-shape"
-                onClick={() => handleHotspotClick(hotspot.slug)}
-              />
+              <g key={hotspot.id}>
+                {/* Layer 1: Shadow/glow stroke - darker, blurred, underneath */}
+                <polygon
+                  points={points}
+                  fill="none"
+                  stroke={shadowStrokeColor}
+                  strokeWidth={shadowWidth}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  strokeOpacity={0.6}
+                  filter="url(#glow-visitor)"
+                  style={{ pointerEvents: 'none' }}
+                />
+                
+                {/* Layer 2: Main fill */}
+                <polygon
+                  points={points}
+                  fill={style.fillColor}
+                  fillOpacity={fillOpacity}
+                  stroke="none"
+                  style={{ pointerEvents: 'none' }}
+                />
+                
+                {/* Layer 3: Main stroke - rounded corners */}
+                <polygon
+                  points={points}
+                  fill="none"
+                  stroke={mainStrokeColor}
+                  strokeWidth={mainWidth}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  style={{ pointerEvents: 'none' }}
+                />
+                
+                {/* Layer 4: Inner highlight stroke - subtle lighter edge */}
+                <polygon
+                  points={points}
+                  fill="none"
+                  stroke={highlightStrokeColor}
+                  strokeWidth={highlightWidth}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  strokeOpacity={0.4}
+                  style={{ pointerEvents: 'none' }}
+                />
+                
+                {/* Invisible click target on top */}
+                <polygon
+                  points={points}
+                  fill="transparent"
+                  stroke="transparent"
+                  strokeWidth={2}
+                  className="cursor-pointer"
+                  style={{ pointerEvents: 'auto' }}
+                  onClick={() => handleHotspotClick(hotspot.slug)}
+                />
+              </g>
             )
           }
           
+          // Legacy shape support (if any exist)
           if (hotspot.shape === 'rectangle' && 'x' in boundsData) {
+            const { x, y, width, height } = boundsData as { x: number, y: number, width: number, height: number }
             return (
               <rect
                 key={hotspot.id}
-                x={boundsData.x}
-                y={boundsData.y}
-                width={boundsData.width}
-                height={boundsData.height}
-                className="hotspot-shape"
+                x={x}
+                y={y}
+                width={width}
+                height={height}
+                fill={style.fillColor}
+                fillOpacity={fillOpacity}
+                stroke={mainStrokeColor}
+                strokeWidth={mainWidth}
+                className="cursor-pointer"
+                style={{ pointerEvents: 'auto' }}
                 onClick={() => handleHotspotClick(hotspot.slug)}
               />
             )
           }
           
           if (hotspot.shape === 'circle' && 'cx' in boundsData) {
+            const { cx, cy, r } = boundsData as { cx: number, cy: number, r: number }
             return (
               <circle
                 key={hotspot.id}
-                cx={boundsData.cx}
-                cy={boundsData.cy}
-                r={boundsData.r}
-                className="hotspot-shape"
+                cx={cx}
+                cy={cy}
+                r={r}
+                fill={style.fillColor}
+                fillOpacity={fillOpacity}
+                stroke={mainStrokeColor}
+                strokeWidth={mainWidth}
+                className="cursor-pointer"
+                style={{ pointerEvents: 'auto' }}
                 onClick={() => handleHotspotClick(hotspot.slug)}
               />
             )
@@ -494,6 +594,9 @@ export function InteractiveViewer() {
   // Load config and hotspots from database
   const { config, hotspots, loading } = useSplatData()
   
+  // Extract hotspot style from config settings
+  const hotspotStyle = getStyleFromConfig(config)
+  
   // Populate store with hotspots when they load
   useEffect(() => {
     if (hotspots) {
@@ -553,7 +656,7 @@ export function InteractiveViewer() {
       <LetterboxOverlay bounds={bounds} />
 
       {/* UI Layer - all positioned relative to constrained bounds */}
-      <ConstrainedHotspotOverlay bounds={bounds} frameWidth={frameWidth} />
+      <ConstrainedHotspotOverlay bounds={bounds} frameWidth={frameWidth} style={hotspotStyle} />
       <ConstrainedFrameOverlay bounds={bounds} frameWidth={frameWidth} />
       
       {/* Info Panel - positioned at right edge of viewport */}
