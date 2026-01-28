@@ -1,17 +1,21 @@
 import ReactDOM from 'react-dom/client'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import './styles/index.css'
 
-// ============================================
-// TOGGLE: Switch between App and SplatTest
-// ============================================
-// For normal kiosk: import App from './App'
-// For splat testing: import App from './SplatTest'
-import App from './SplatTest'
+// Pages
+import InteractiveViewer from './components/interactive/InteractiveViewer'
+import AdminLanding from './components/admin/AdminLanding'
+import CameraCapture from './components/admin/CameraCapture'
 
 // Note: StrictMode removed because WebGL libraries
 // don't handle React's double-mount/unmount cycle properly.
-// StrictMode is only active in development anyway.
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <App />
+  <BrowserRouter>
+    <Routes>
+      <Route path="/" element={<InteractiveViewer />} />
+      <Route path="/admin" element={<AdminLanding />} />
+      <Route path="/admin/camera-capture" element={<CameraCapture />} />
+    </Routes>
+  </BrowserRouter>
 )
