@@ -29,6 +29,33 @@ export default function AdminLanding() {
 
         {/* Admin Menu */}
         <div className="grid gap-4 md:grid-cols-2">
+          {/* Display Settings - FOUNDATIONAL */}
+          <Link
+            to="/admin/display-settings"
+            className="bg-amber-900/30 hover:bg-amber-900/50 border border-amber-600/50 rounded-lg p-6 transition-colors"
+          >
+            <h2 className="text-xl font-display text-amber-400 mb-2">
+              🖥️ Display Settings
+            </h2>
+            <p className="text-gray-400 text-sm">
+              Set target kiosk resolution and overview camera position. Configure these first.
+            </p>
+            <span className="text-xs text-amber-600 mt-2 block">Start here</span>
+          </Link>
+
+          {/* Hotspot Editor */}
+          <Link
+            to="/admin/hotspot-editor"
+            className="bg-museum-brown/30 hover:bg-museum-brown/50 border border-museum-accent/30 rounded-lg p-6 transition-colors"
+          >
+            <h2 className="text-xl font-display text-museum-highlight mb-2">
+              🎯 Hotspot Regions
+            </h2>
+            <p className="text-gray-400 text-sm">
+              Draw polygon regions around equipment. Click to place points, double-click to close shapes.
+            </p>
+          </Link>
+
           {/* Camera Capture */}
           <Link
             to="/admin/camera-capture"
@@ -39,19 +66,6 @@ export default function AdminLanding() {
             </h2>
             <p className="text-gray-400 text-sm">
               Capture camera viewpoints for equipment hotspots. Navigate the 3D model and save positions.
-            </p>
-          </Link>
-
-          {/* Hotspot Editor - NOW ENABLED */}
-          <Link
-            to="/admin/hotspot-editor"
-            className="bg-museum-brown/30 hover:bg-museum-brown/50 border border-museum-accent/30 rounded-lg p-6 transition-colors"
-          >
-            <h2 className="text-xl font-display text-museum-highlight mb-2">
-              🎯 Hotspot Regions
-            </h2>
-            <p className="text-gray-400 text-sm">
-              Draw polygon regions around equipment. Click to place points, double-click to close shapes.
             </p>
           </Link>
 
