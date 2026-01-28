@@ -99,6 +99,36 @@ export async function updateSplatConfigOverview(
 }
 
 /**
+ * Update a splat config's settings (merges with existing settings)
+ */
+export async function updateSplatConfigSettings(
+  id: string,
+  settingsUpdate: Record<string, unknown>
+): Promise<boolean> {
+  // First get current settings to merge
+  const { data: current } = await supabase
+    .from('splat_configs')
+    .select('settings')
+    .eq('id', id)
+    .single()
+
+  const currentSettings = (current?.settings as Record<string, unknown>) || {}
+  const mergedSettings = { ...currentSettings, ...settingsUpdate }
+
+  const { error } = await supabase
+    .from('splat_configs')
+    .update({ settings: mergedSettings })
+    .eq('id', id)
+
+  if (error) {
+    console.error('Error updating splat config settings:', error)
+    return false
+  }
+
+  return true
+}
+
+/**
  * Update a splat config
  */
 export async function updateSplatConfig(

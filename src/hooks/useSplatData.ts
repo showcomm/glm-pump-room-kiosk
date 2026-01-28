@@ -10,6 +10,7 @@ import {
   updateHotspotViewpoint,
   updateHotspotBounds,
   updateSplatConfigOverview,
+  updateSplatConfigSettings,
   type HotspotBounds,
 } from '../lib/api/splat'
 
@@ -49,6 +50,10 @@ interface UseSplatDataReturn {
     position: [number, number, number],
     rotation: [number, number, number],
     fov: number
+  ) => Promise<boolean>
+  /** Update config settings and refresh local state */
+  saveConfigSettings: (
+    settingsUpdate: Record<string, unknown>
   ) => Promise<boolean>
 }
 
@@ -184,6 +189,33 @@ export function useSplatData(options: UseSplatDataOptions = {}): UseSplatDataRet
     [config]
   )
 
+  // Save config settings and update local state
+  const saveConfigSettings = useCallback(
+    async (settingsUpdate: Record<string, unknown>): Promise<boolean> => {
+      if (!config) return false
+
+      const success = await updateSplatConfigSettings(config.id, settingsUpdate)
+
+      if (success) {
+        // Update local state immediately
+        setConfig((prev) =>
+          prev
+            ? {
+                ...prev,
+                settings: {
+                  ...((prev.settings as Record<string, unknown>) || {}),
+                  ...settingsUpdate,
+                },
+              }
+            : null
+        )
+      }
+
+      return success
+    },
+    [config]
+  )
+
   return {
     config,
     hotspots,
@@ -193,5 +225,6 @@ export function useSplatData(options: UseSplatDataOptions = {}): UseSplatDataRet
     saveHotspotViewpoint,
     saveHotspotBounds,
     saveOverviewViewpoint,
+    saveConfigSettings,
   }
 }
