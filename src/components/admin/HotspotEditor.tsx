@@ -6,14 +6,10 @@
  * Solution: Isolate the Application in a component with ZERO changing props/state.
  * The SplatViewer component below is completely static - it never re-renders.
  * 
- * LAYOUT STRUCTURE:
- * <div flex>
- *   <div flex-1>  ← viewport container (for bounds calculation)
- *     <SplatViewer />  ← isolated, never re-renders
- *     <ViewportOverlays />  ← SVG + frame, re-renders freely
- *   </div>
- *   <Sidebar />  ← MUST be sibling to viewport for flex layout
- * </div>
+ * SELECTION MODEL:
+ * - Sidebar is the PRIMARY way to select hotspots for editing
+ * - Canvas clicks do NOT select polygons (prevents accidental selection when editing nearby shapes)
+ * - Only sidebar selection shows vertex handles
  * 
  * COORDINATE SYSTEM:
  * - Stored coordinates are 0-100 percentages in both X and Y
@@ -42,12 +38,9 @@ const FRAME_WIDTH = 24
 
 const DEFAULT_STYLE = {
   fillColor: '#8b7355',
-  fillOpacity: 0.12,
+  fillOpacity: 0.15,
   strokeColor: '#c4a574',
-  strokeWidth: 0.3,
-  selectedFillOpacity: 0.22,
-  selectedStrokeColor: '#f59e0b',
-  selectedStrokeWidth: 0.5
+  strokeWidth: 0.4
 }
 
 interface Point {
@@ -154,7 +147,6 @@ interface PolygonShapeProps {
   isSelected: boolean
   style: typeof DEFAULT_STYLE
   aspectRatio: number
-  onSelect?: () => void
   onVertexDrag?: (index: number, newPos: Point) => void
   onMidpointClick?: (index: number) => void
   onVertexDelete?: (index: number) => void
@@ -162,7 +154,7 @@ interface PolygonShapeProps {
 
 function PolygonShape({ 
   points, isSelected, style, aspectRatio,
-  onSelect, onVertexDrag, onMidpointClick, onVertexDelete
+  onVertexDrag, onMidpointClick, onVertexDelete
 }: PolygonShapeProps) {
   const [draggingVertex, setDraggingVertex] = useState<number | null>(null)
   const [hoverVertex, setHoverVertex] = useState<number | null>(null)
@@ -215,22 +207,24 @@ function PolygonShape({
   const VERTEX_R = 1.2, VERTEX_HOVER_R = 1.5, VERTEX_TOUCH_R = 3.5
   const MID_R = 0.8, MID_TOUCH_R = 2.0
   
-  const fillOpacity = isSelected ? style.selectedFillOpacity : style.fillOpacity
-  const strokeColor = isSelected ? style.selectedStrokeColor : style.strokeColor
-  const strokeWidth = isSelected ? style.selectedStrokeWidth : style.strokeWidth
+  // Selected state: brighten stroke, increase opacity
+  const fillOpacity = isSelected ? Math.min(style.fillOpacity * 2, 0.4) : style.fillOpacity
+  const strokeColor = isSelected ? '#f59e0b' : style.strokeColor
+  const strokeWidth = isSelected ? Math.max(style.strokeWidth * 1.5, 0.5) : style.strokeWidth
   
   return (
     <g ref={svgRef}>
+      {/* Polygon fill and stroke - NO click handler, selection via sidebar only */}
       <polygon
         points={pointsStr}
         fill={style.fillColor}
         fillOpacity={fillOpacity}
         stroke={strokeColor}
         strokeWidth={strokeWidth}
-        className="cursor-pointer"
-        onClick={(e) => { e.stopPropagation(); onSelect?.() }}
+        style={{ pointerEvents: 'none' }}
       />
       
+      {/* Midpoint handles - only when selected */}
       {isSelected && points.length >= 3 && midpoints.map((p, i) => {
         if (isMidpointTooCloseToVertex(p)) return null
         return (
@@ -249,6 +243,7 @@ function PolygonShape({
         )
       })}
       
+      {/* Vertex handles - only when selected */}
       {isSelected && points.map((p, i) => (
         <g key={`v-${i}`}>
           <CircleAsEllipse cx={p.x} cy={p.y} r={VERTEX_TOUCH_R} aspectRatio={aspectRatio}
@@ -284,12 +279,12 @@ function DrawingPolygon({ points, mousePos, style, aspectRatio }: {
   
   return (
     <g>
-      <polyline points={pointsStr} fill="none" stroke={style.selectedStrokeColor}
-        strokeWidth={style.selectedStrokeWidth} strokeDasharray="1.5,0.75" />
+      <polyline points={pointsStr} fill="none" stroke="#f59e0b"
+        strokeWidth={0.5} strokeDasharray="1.5,0.75" />
       
       {points.length >= 2 && mousePos && (
         <line x1={mousePos.x} y1={mousePos.y} x2={points[0].x} y2={points[0].y}
-          stroke={style.selectedStrokeColor} strokeWidth={0.3} strokeDasharray="1,1" opacity={0.4} />
+          stroke="#22c55e" strokeWidth={0.3} strokeDasharray="1,1" opacity={0.6} />
       )}
       
       {points.map((p, i) => (
@@ -298,9 +293,10 @@ function DrawingPolygon({ points, mousePos, style, aspectRatio }: {
           stroke="rgba(0,0,0,0.4)" strokeWidth={0.15} />
       ))}
       
+      {/* Close zone indicator */}
       {points.length >= 3 && (
-        <CircleAsEllipse cx={points[0].x} cy={points[0].y} r={3.0}
-          aspectRatio={aspectRatio} fill="none" stroke="#22c55e" strokeWidth={0.2} />
+        <CircleAsEllipse cx={points[0].x} cy={points[0].y} r={4.0}
+          aspectRatio={aspectRatio} fill="rgba(34, 197, 94, 0.15)" stroke="#22c55e" strokeWidth={0.2} />
       )}
     </g>
   )
@@ -312,7 +308,6 @@ function DrawingPolygon({ points, mousePos, style, aspectRatio }: {
 interface OverlayProps {
   hotspots: ParsedSplatHotspot[]
   selectedId: string | null
-  onSelectHotspot: (id: string | null) => void
   onUpdateBounds: (id: string, bounds: PolygonBounds) => void
   mode: EditorMode
   drawingPoints: Point[]
@@ -325,7 +320,7 @@ interface OverlayProps {
 }
 
 function HotspotSvgOverlay({
-  hotspots, selectedId, onSelectHotspot, onUpdateBounds,
+  hotspots, selectedId, onUpdateBounds,
   mode, drawingPoints, onAddDrawingPoint, onCompleteDrawing,
   mousePos, onMouseMove, style, aspectRatio
 }: OverlayProps) {
@@ -341,15 +336,28 @@ function HotspotSvgOverlay({
   }
   
   const handleClick = (e: React.MouseEvent) => {
+    if (mode !== 'draw') return
+    
     const pos = getMousePosition(e)
-    if (mode === 'draw') {
-      if (drawingPoints.length >= 3) {
-        const first = drawingPoints[0]
-        const dx = (pos.x - first.x) / aspectRatio
-        const dy = pos.y - first.y
-        if (Math.sqrt(dx * dx + dy * dy) < 5) { onCompleteDrawing(); return }
+    
+    // Check if clicking near first point to close (with larger threshold)
+    if (drawingPoints.length >= 3) {
+      const first = drawingPoints[0]
+      const dx = (pos.x - first.x) / aspectRatio
+      const dy = pos.y - first.y
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      if (dist < 6) {
+        onCompleteDrawing()
+        return
       }
-      onAddDrawingPoint(pos)
+    }
+    
+    onAddDrawingPoint(pos)
+  }
+  
+  const handleDoubleClick = () => {
+    if (mode === 'draw' && drawingPoints.length >= 3) {
+      onCompleteDrawing()
     }
   }
   
@@ -388,10 +396,11 @@ function HotspotSvgOverlay({
       className="absolute inset-0 w-full h-full"
       style={{ cursor: mode === 'draw' ? 'crosshair' : 'default' }}
       onClick={handleClick}
-      onDoubleClick={() => mode === 'draw' && drawingPoints.length >= 3 && onCompleteDrawing()}
+      onDoubleClick={handleDoubleClick}
       onMouseMove={(e) => onMouseMove(getMousePosition(e))}
       onContextMenu={(e) => e.preventDefault()}
     >
+      {/* Render all polygons - NO click selection, sidebar only */}
       {hotspots.map(hotspot => {
         if (hotspot.shape !== 'polygon') return null
         const bounds = hotspot.bounds as PolygonBounds
@@ -399,33 +408,56 @@ function HotspotSvgOverlay({
         return (
           <PolygonShape key={hotspot.id} points={bounds.points} isSelected={selectedId === hotspot.id}
             style={style} aspectRatio={aspectRatio}
-            onSelect={() => onSelectHotspot(hotspot.id)}
             onVertexDrag={(i, pos) => handleVertexDrag(hotspot.id, i, pos)}
             onMidpointClick={(i) => handleMidpointClick(hotspot.id, i)}
             onVertexDelete={(i) => handleVertexDelete(hotspot.id, i)}
           />
         )
       })}
+      
+      {/* Drawing in progress */}
       {mode === 'draw' && <DrawingPolygon points={drawingPoints} mousePos={mousePos} style={style} aspectRatio={aspectRatio} />}
     </svg>
   )
 }
 
 // ============================================
-// Style Editor
+// Style Editor with Preview
 // ============================================
 function StyleEditor({ style, onChange }: { style: typeof DEFAULT_STYLE; onChange: (s: typeof DEFAULT_STYLE) => void }) {
   return (
-    <div className="space-y-2 text-[10px]">
+    <div className="space-y-3 text-[10px]">
+      {/* Preview swatch */}
+      <div className="flex items-center gap-2">
+        <span className="text-neutral-500 w-12">Preview</span>
+        <div className="flex-1 h-6 rounded border border-neutral-600 relative overflow-hidden">
+          <div 
+            className="absolute inset-0"
+            style={{ 
+              backgroundColor: style.fillColor, 
+              opacity: style.fillOpacity 
+            }} 
+          />
+          <div 
+            className="absolute inset-1 rounded-sm"
+            style={{ 
+              border: `2px solid ${style.strokeColor}`,
+              opacity: 0.8
+            }} 
+          />
+        </div>
+      </div>
+      
       <div className="flex items-center gap-2">
         <label className="text-neutral-500 w-12">Fill</label>
         <input type="color" value={style.fillColor} onChange={(e) => onChange({ ...style, fillColor: e.target.value })}
           className="w-5 h-5 rounded border border-neutral-600 bg-transparent cursor-pointer" />
-        <input type="range" min="0" max="40" value={style.fillOpacity * 100}
+        <input type="range" min="5" max="50" value={style.fillOpacity * 100}
           onChange={(e) => onChange({ ...style, fillOpacity: Number(e.target.value) / 100 })}
           className="flex-1 h-1 accent-amber-600" />
-        <span className="text-neutral-500 w-6 text-right">{Math.round(style.fillOpacity * 100)}%</span>
+        <span className="text-neutral-500 w-8 text-right">{Math.round(style.fillOpacity * 100)}%</span>
       </div>
+      
       <div className="flex items-center gap-2">
         <label className="text-neutral-500 w-12">Stroke</label>
         <input type="color" value={style.strokeColor} onChange={(e) => onChange({ ...style, strokeColor: e.target.value })}
@@ -433,7 +465,7 @@ function StyleEditor({ style, onChange }: { style: typeof DEFAULT_STYLE; onChang
         <input type="range" min="10" max="100" value={style.strokeWidth * 100}
           onChange={(e) => onChange({ ...style, strokeWidth: Number(e.target.value) / 100 })}
           className="flex-1 h-1 accent-amber-600" />
-        <span className="text-neutral-500 w-6 text-right">{style.strokeWidth.toFixed(1)}</span>
+        <span className="text-neutral-500 w-8 text-right">{style.strokeWidth.toFixed(1)}</span>
       </div>
     </div>
   )
@@ -527,13 +559,18 @@ function Sidebar({
 }: SidebarProps) {
   const [newName, setNewName] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [showStyle, setShowStyle] = useState(false)
+  const [showStyle, setShowStyle] = useState(true)
   
   const selectedHotspot = localHotspots?.find(h => h.id === selectedId)
   
   const handleSetMode = (newMode: EditorMode) => {
     setMode(newMode)
     if (newMode === 'draw') { setSelectedId(null); setDrawingPoints([]) }
+  }
+  
+  const handleSelectHotspot = (id: string) => {
+    setSelectedId(id)
+    setMode('select')
   }
   
   const handleCreate = () => {
@@ -564,7 +601,7 @@ function Sidebar({
         
         {mode === 'draw' && (
           <div className="mt-2 text-[10px] text-neutral-500">
-            Click to place vertices. Click first point or double-click to close.
+            Click to place vertices. Click green circle or double-click to close.
             {drawingPoints.length > 0 && (
               <div className="mt-1 flex items-center justify-between text-neutral-400">
                 <span>{drawingPoints.length} points</span>
@@ -575,6 +612,7 @@ function Sidebar({
         )}
       </div>
       
+      {/* Save panel when drawing is ready */}
       {mode === 'draw' && drawingPoints.length >= 3 && (
         <div className="p-3 border-b border-neutral-700 bg-green-900/20">
           <p className="text-[10px] text-green-400 mb-2">Ready to save ({drawingPoints.length} points)</p>
@@ -589,13 +627,14 @@ function Sidebar({
         </div>
       )}
       
+      {/* Selected hotspot info */}
       {mode === 'select' && selectedHotspot && (
         <div className="p-3 border-b border-neutral-700 bg-amber-900/10">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-amber-400">{selectedHotspot.name_en}</span>
             <span className="text-[9px] text-neutral-600">{(selectedHotspot.bounds as PolygonBounds)?.points?.length ?? 0} vertices</span>
           </div>
-          <p className="text-[9px] text-neutral-500 mt-1">Drag vertices • Click edge to add • Right-click to delete</p>
+          <p className="text-[9px] text-neutral-500 mt-1">Drag vertices • Click edge midpoint to add • Right-click vertex to delete</p>
           
           {confirmDelete === selectedHotspot.id ? (
             <div className="flex gap-2 mt-2">
@@ -613,13 +652,15 @@ function Sidebar({
         </div>
       )}
       
+      {/* Style editor - always visible */}
       <div className="p-3 border-b border-neutral-700">
-        <button onClick={() => setShowStyle(!showStyle)} className="text-[10px] text-neutral-500 hover:text-neutral-400 flex items-center gap-1">
+        <button onClick={() => setShowStyle(!showStyle)} className="text-[10px] text-neutral-400 hover:text-neutral-300 flex items-center gap-1 mb-2">
           <span>{showStyle ? '▼' : '▶'}</span><span>Polygon Style</span>
         </button>
-        {showStyle && <div className="mt-2"><StyleEditor style={style} onChange={setStyle} /></div>}
+        {showStyle && <StyleEditor style={style} onChange={setStyle} />}
       </div>
       
+      {/* Hotspot list */}
       <div className="flex-1 overflow-y-auto p-3">
         <div className="flex items-center justify-between mb-2">
           <span className="text-[9px] text-neutral-600 font-medium">HOTSPOTS ({localHotspots?.length ?? 0})</span>
@@ -628,13 +669,17 @@ function Sidebar({
         
         <div className="space-y-0.5">
           {(localHotspots ?? []).map(h => (
-            <button key={h.id} onClick={() => setSelectedId(h.id)}
-              className={`w-full text-left px-2 py-1.5 rounded text-xs ${selectedId === h.id ? 'bg-amber-900/40 text-amber-100' : 'text-neutral-400 hover:bg-neutral-800'}`}>
+            <button key={h.id} onClick={() => handleSelectHotspot(h.id)}
+              className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors ${
+                selectedId === h.id 
+                  ? 'bg-amber-700 text-white' 
+                  : 'text-neutral-400 hover:bg-neutral-800'
+              }`}>
               <div className="flex items-center justify-between">
                 <span>{h.name_en}</span>
                 <div className="flex items-center gap-1">
-                  {h.viewpoint_position && <span className="text-[9px] text-green-500" title="Has viewpoint">📷</span>}
-                  <span className="text-[9px] text-neutral-600">{(h.bounds as PolygonBounds)?.points?.length ?? 0}pt</span>
+                  {h.viewpoint_position && <span className="text-[9px]" title="Has viewpoint">📷</span>}
+                  <span className="text-[9px] opacity-60">{(h.bounds as PolygonBounds)?.points?.length ?? 0}pt</span>
                 </div>
               </div>
             </button>
@@ -681,9 +726,11 @@ export default function HotspotEditor() {
   
   useEffect(() => { setLocalHotspots(hotspots ?? []) }, [hotspots])
   
-  const handleSelectHotspot = (id: string | null) => {
-    setSelectedId(id)
-    if (id) setMode('select')
+  // Complete drawing - creates a new hotspot and prompts for name
+  const handleCompleteDrawing = () => {
+    if (drawingPoints.length < 3) return
+    // Drawing is complete, the sidebar will show the save panel
+    // User enters name there and clicks save
   }
   
   const handleCreateHotspot = async (name: string) => {
@@ -694,8 +741,13 @@ export default function HotspotEditor() {
       splat_config_id: config.id, slug, name_en: name, shape: 'polygon',
       bounds: { points: drawingPoints }, order_index: localHotspots?.length ?? 0, active: true
     })
-    if (newHotspot) { setLocalHotspots(prev => [...(prev ?? []), newHotspot]); setSelectedId(newHotspot.id) }
-    setDrawingPoints([]); setMode('select'); setSaving(false)
+    if (newHotspot) { 
+      setLocalHotspots(prev => [...(prev ?? []), newHotspot])
+      setSelectedId(newHotspot.id) 
+    }
+    setDrawingPoints([])
+    setMode('select')
+    setSaving(false)
   }
   
   const handleDeleteHotspot = async (id: string) => {
@@ -715,7 +767,7 @@ export default function HotspotEditor() {
   
   return (
     <div className="w-screen h-screen bg-black flex">
-      {/* Main viewport area - flex-1 takes remaining space */}
+      {/* Main viewport area */}
       <div ref={viewportContainerRef} className="flex-1 relative">
         {/* Letterbox/pillarbox */}
         {bounds.width > 0 && (
@@ -747,12 +799,16 @@ export default function HotspotEditor() {
           <div className="absolute z-10" style={{ left: bounds.left + FRAME_WIDTH, top: bounds.top + FRAME_WIDTH, width: innerWidth, height: innerHeight }}>
             <HotspotSvgOverlay
               hotspots={(localHotspots ?? []).filter(h => h.shape === 'polygon')}
-              selectedId={selectedId} onSelectHotspot={handleSelectHotspot} onUpdateBounds={handleUpdateBounds}
-              mode={mode} drawingPoints={drawingPoints}
+              selectedId={selectedId}
+              onUpdateBounds={handleUpdateBounds}
+              mode={mode}
+              drawingPoints={drawingPoints}
               onAddDrawingPoint={(p) => setDrawingPoints(prev => [...prev, p])}
-              onCompleteDrawing={() => {}}
-              mousePos={mousePos} onMouseMove={setMousePos}
-              style={style} aspectRatio={aspectRatio}
+              onCompleteDrawing={handleCompleteDrawing}
+              mousePos={mousePos}
+              onMouseMove={setMousePos}
+              style={style}
+              aspectRatio={aspectRatio}
             />
           </div>
         )}
@@ -768,7 +824,7 @@ export default function HotspotEditor() {
         )}
       </div>
       
-      {/* Sidebar - OUTSIDE viewport container, sibling for flex layout */}
+      {/* Sidebar */}
       <Sidebar
         mode={mode} setMode={setMode}
         selectedId={selectedId} setSelectedId={setSelectedId}
