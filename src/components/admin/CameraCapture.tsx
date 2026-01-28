@@ -1,19 +1,19 @@
 /**
  * Camera Capture Page - Transform Editor
  * 
- * Like SuperSplat transform controls:
- * - Drag on input fields to adjust values
- * - Or type values directly
- * - Copy viewpoint code to paste into viewpoints.ts
+ * Two-way control:
+ * 1. Mouse orbit/zoom to roughly position camera
+ * 2. Numeric inputs to fine-tune exact values
  * 
- * TODO: Later, save directly to Supabase viewpoints table
+ * Camera position syncs both ways - orbit updates inputs, inputs update camera.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { Application, Entity } from '@playcanvas/react'
-import { Camera, GSplat } from '@playcanvas/react/components'
+import { Camera, GSplat, Script } from '@playcanvas/react/components'
 import { useSplat, useApp } from '@playcanvas/react/hooks'
+import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs'
 import { equipment } from '../../data/equipment'
 import { getOverviewViewpoint } from '../../data/viewpoints'
 
@@ -37,31 +37,65 @@ function PumpRoomSplat({ src }: { src: string }) {
 }
 
 // ============================================
-// Camera Controller
+// Camera Controller - two-way sync
+// Broadcasts position to UI, receives position commands from UI
 // ============================================
 function CameraController() {
   const app = useApp()
+  const frameRef = useRef<number>()
+  const isSettingFromUI = useRef(false)
   
   useEffect(() => {
     if (!app) return
     
+    // Handle commands from UI to set camera position
     const handleSetTransform = (e: CustomEvent) => {
       const cameraEntity = app.root.findByName('camera')
       if (!cameraEntity) return
+      
+      isSettingFromUI.current = true
       const { position, rotation } = e.detail
       cameraEntity.setPosition(position[0], position[1], position[2])
       cameraEntity.setEulerAngles(rotation[0], rotation[1], rotation[2])
+      
+      // Reset flag after a short delay
+      setTimeout(() => { isSettingFromUI.current = false }, 50)
     }
     
     window.addEventListener('set-camera-transform', handleSetTransform as EventListener)
-    return () => window.removeEventListener('set-camera-transform', handleSetTransform as EventListener)
+    
+    // Broadcast camera position to UI continuously
+    const broadcastPosition = () => {
+      // Don't broadcast while UI is setting position (prevents feedback loop)
+      if (!isSettingFromUI.current) {
+        const cameraEntity = app.root.findByName('camera')
+        if (cameraEntity) {
+          const pos = cameraEntity.getPosition()
+          const rot = cameraEntity.getEulerAngles()
+          window.dispatchEvent(new CustomEvent('camera-position-update', {
+            detail: {
+              position: [pos.x, pos.y, pos.z],
+              rotation: [rot.x, rot.y, rot.z]
+            }
+          }))
+        }
+      }
+      frameRef.current = requestAnimationFrame(broadcastPosition)
+    }
+    
+    frameRef.current = requestAnimationFrame(broadcastPosition)
+    
+    return () => {
+      window.removeEventListener('set-camera-transform', handleSetTransform as EventListener)
+      if (frameRef.current) cancelAnimationFrame(frameRef.current)
+    }
   }, [app])
   
   return null
 }
 
 // ============================================
-// Draggable Number Input
+// Draggable Number Input with visible handle
 // ============================================
 interface DragInputProps {
   value: number
@@ -73,26 +107,28 @@ interface DragInputProps {
 function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps) {
   const [localValue, setLocalValue] = useState(value.toFixed(decimals))
   const [isDragging, setIsDragging] = useState(false)
+  const [isHovering, setIsHovering] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const dragStartX = useRef(0)
   const dragStartValue = useRef(0)
   
+  // Sync from prop when not dragging
   useEffect(() => {
-    if (!isDragging) {
+    if (!isDragging && document.activeElement !== inputRef.current) {
       setLocalValue(value.toFixed(decimals))
     }
   }, [value, decimals, isDragging])
   
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.target === inputRef.current) return // Don't drag when clicking in input
+  const handleDragStart = (e: React.MouseEvent) => {
     e.preventDefault()
     setIsDragging(true)
     dragStartX.current = e.clientX
     dragStartValue.current = value
     document.body.style.cursor = 'ew-resize'
+    document.body.style.userSelect = 'none'
     
     const handleMouseMove = (e: MouseEvent) => {
-      const delta = (e.clientX - dragStartX.current) * step * 0.3
+      const delta = (e.clientX - dragStartX.current) * step * 0.5
       const newValue = dragStartValue.current + delta
       onChange(Number(newValue.toFixed(decimals)))
     }
@@ -100,6 +136,7 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
     const handleMouseUp = () => {
       setIsDragging(false)
       document.body.style.cursor = ''
+      document.body.style.userSelect = ''
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
@@ -126,9 +163,21 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
   
   return (
     <div 
-      className="relative cursor-ew-resize select-none"
-      onMouseDown={handleMouseDown}
+      className="relative flex items-center"
+      onMouseEnter={() => setIsHovering(true)}
+      onMouseLeave={() => setIsHovering(false)}
     >
+      {/* Drag handle */}
+      <div
+        onMouseDown={handleDragStart}
+        className={`absolute left-0 top-0 bottom-0 w-3 flex items-center justify-center 
+                    cursor-ew-resize rounded-l border-r border-neutral-600
+                    transition-colors ${isHovering || isDragging ? 'bg-amber-800' : 'bg-neutral-700'}`}
+        title="Drag to adjust"
+      >
+        <span className="text-[8px] text-neutral-400">⋮</span>
+      </div>
+      
       <input
         ref={inputRef}
         type="text"
@@ -136,8 +185,8 @@ function DragInput({ value, onChange, step = 0.1, decimals = 2 }: DragInputProps
         onChange={handleChange}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
-        className="w-16 bg-neutral-800 border border-neutral-600 rounded px-2 py-1 
-                   text-xs text-white text-right font-mono cursor-text
+        className="w-[70px] pl-4 pr-1 py-1 bg-neutral-800 border border-neutral-600 rounded 
+                   text-xs text-white text-right font-mono
                    focus:border-amber-600 focus:outline-none"
       />
     </div>
@@ -157,13 +206,13 @@ interface TransformRowProps {
 
 function TransformRow({ label, values, onChange, step = 0.1, decimals = 2 }: TransformRowProps) {
   return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="text-neutral-400 w-14">{label}</span>
-      <span className="text-neutral-500 w-3">X</span>
+    <div className="flex items-center gap-1 text-xs">
+      <span className="text-neutral-400 w-12">{label}</span>
+      <span className="text-red-400 text-[10px]">X</span>
       <DragInput value={values[0]} onChange={(v) => onChange(0, v)} step={step} decimals={decimals} />
-      <span className="text-neutral-500 w-3">Y</span>
+      <span className="text-green-400 text-[10px]">Y</span>
       <DragInput value={values[1]} onChange={(v) => onChange(1, v)} step={step} decimals={decimals} />
-      <span className="text-neutral-500 w-3">Z</span>
+      <span className="text-blue-400 text-[10px]">Z</span>
       <DragInput value={values[2]} onChange={(v) => onChange(2, v)} step={step} decimals={decimals} />
     </div>
   )
@@ -179,6 +228,19 @@ function Sidebar() {
   const [savedViewpoints, setSavedViewpoints] = useState<Record<string, any>>({})
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null)
   
+  // Listen for camera position updates from the 3D viewer
+  useEffect(() => {
+    const handleCameraUpdate = (e: CustomEvent) => {
+      const { position: pos, rotation: rot } = e.detail
+      setPosition([pos[0], pos[1], pos[2]])
+      setRotation([rot[0], rot[1], rot[2]])
+    }
+    
+    window.addEventListener('camera-position-update', handleCameraUpdate as EventListener)
+    return () => window.removeEventListener('camera-position-update', handleCameraUpdate as EventListener)
+  }, [])
+  
+  // Send transform command to camera
   const updateCamera = useCallback((pos: [number, number, number], rot: [number, number, number]) => {
     window.dispatchEvent(new CustomEvent('set-camera-transform', {
       detail: { position: pos, rotation: rot }
@@ -255,12 +317,8 @@ function Sidebar() {
     setTimeout(() => setCopyFeedback(null), 1500)
   }
   
-  useEffect(() => {
-    updateCamera(position, rotation)
-  }, []) // eslint-disable-line
-  
   return (
-    <div className="w-80 bg-neutral-900 text-white text-sm flex flex-col">
+    <div className="w-96 bg-neutral-900 text-white text-sm flex flex-col">
       {/* Header */}
       <div className="p-3 border-b border-neutral-700">
         <Link to="/admin" className="text-amber-600 hover:text-amber-500 text-xs">
@@ -278,10 +336,12 @@ function Sidebar() {
           </button>
         </div>
         <div className="space-y-2">
-          <TransformRow label="Position" values={position} onChange={handlePositionChange} step={0.1} decimals={2} />
-          <TransformRow label="Rotation" values={rotation} onChange={handleRotationChange} step={1} decimals={1} />
+          <TransformRow label="Position" values={position} onChange={handlePositionChange} step={0.05} decimals={2} />
+          <TransformRow label="Rotation" values={rotation} onChange={handleRotationChange} step={0.5} decimals={1} />
         </div>
-        <p className="text-[10px] text-neutral-600 mt-2">Drag on fields to adjust, or type values</p>
+        <p className="text-[10px] text-neutral-600 mt-2">
+          Orbit/zoom with mouse, fine-tune by dragging handle or typing
+        </p>
       </div>
       
       {/* Equipment Selection */}
@@ -346,16 +406,17 @@ function Sidebar() {
         )}
       </div>
       
-      {/* Footer note */}
+      {/* Footer */}
       <div className="p-3 border-t border-neutral-700 text-[10px] text-neutral-600">
-        Viewpoints are copied to clipboard. Paste into <code className="text-neutral-500">viewpoints.ts</code>
+        <strong>Controls:</strong> Left-drag orbit, scroll zoom<br/>
+        Code copies to clipboard → paste into <code className="text-neutral-500">viewpoints.ts</code>
       </div>
     </div>
   )
 }
 
 // ============================================
-// Viewer
+// Viewer with orbit/zoom controls
 // ============================================
 function SplatViewer() {
   return (
@@ -363,6 +424,7 @@ function SplatViewer() {
       <Application graphicsDeviceOptions={{ antialias: false }}>
         <Entity name="camera" position={INITIAL.position} rotation={INITIAL.rotation}>
           <Camera clearColor="#1a1a2e" fov={60} farClip={1000} nearClip={0.01} />
+          <Script script={CameraControls} />
         </Entity>
         <PumpRoomSplat src={SPLAT_URL} />
         <CameraController />
