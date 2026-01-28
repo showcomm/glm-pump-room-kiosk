@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Application, Entity } from '@playcanvas/react'
-import { Camera, GSplat, Script } from '@playcanvas/react/components'
+import { Camera, GSplat } from '@playcanvas/react/components'
 import { useSplat, useApp } from '@playcanvas/react/hooks'
 import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs'
 import { useKioskStore, checkIdleTimeout } from '../../store/kioskStore'
@@ -130,6 +130,40 @@ function CameraAnimator() {
 }
 
 // ============================================
+// Admin Mode Controller - adds/removes CameraControls imperatively
+// ============================================
+function AdminModeController() {
+  const app = useApp()
+  const isAdminMode = useKioskStore(state => state.isAdminMode)
+  const scriptInstanceRef = useRef<any>(null)
+  
+  useEffect(() => {
+    if (!app) return
+    
+    const cameraEntity = app.root.findByName('camera')
+    if (!cameraEntity) return
+    
+    if (isAdminMode) {
+      // Add CameraControls script imperatively
+      if (!cameraEntity.script) {
+        cameraEntity.addComponent('script')
+      }
+      if (!scriptInstanceRef.current) {
+        scriptInstanceRef.current = cameraEntity.script.create(CameraControls)
+      }
+    } else {
+      // Remove CameraControls script
+      if (scriptInstanceRef.current && cameraEntity.script) {
+        cameraEntity.script.destroy(CameraControls)
+        scriptInstanceRef.current = null
+      }
+    }
+  }, [app, isAdminMode])
+  
+  return null
+}
+
+// ============================================
 // Admin Camera Helper - for capturing positions
 // ============================================
 function AdminCameraHelper() {
@@ -205,7 +239,7 @@ function AdminCameraPanel() {
       className="absolute z-40 bg-black/90 text-white p-4 rounded-lg font-mono text-sm"
       style={{ top: FRAME_WIDTH + 50, left: FRAME_WIDTH + 16 }}
     >
-      <div className="text-yellow-400 mb-2">Camera Position</div>
+      <div className="text-yellow-400 mb-2">ADMIN MODE - Camera Capture</div>
       <div>Pos: [{cameraData.pos.map(v => v.toFixed(2)).join(', ')}]</div>
       <div>Rot: [{cameraData.rot.map(v => v.toFixed(1)).join(', ')}]</div>
       <button
@@ -214,16 +248,17 @@ function AdminCameraPanel() {
       >
         Copy to Clipboard
       </button>
+      <div className="text-gray-500 text-xs mt-2">
+        Left-drag: orbit | Scroll: zoom | Middle-drag: pan
+      </div>
     </div>
   )
 }
 
 // ============================================
-// Static Camera Entity - props NEVER change
+// Static Camera Entity - NO store subscriptions, props NEVER change
 // ============================================
 function StaticCamera() {
-  const isAdminMode = useKioskStore(state => state.isAdminMode)
-  
   return (
     <Entity 
       name="camera" 
@@ -236,7 +271,6 @@ function StaticCamera() {
         farClip={1000}
         nearClip={0.01}
       />
-      {isAdminMode && <Script script={CameraControls} />}
     </Entity>
   )
 }
@@ -250,6 +284,7 @@ function Scene() {
       <StaticCamera />
       <PumpRoomSplat src={SPLAT_URL} />
       <CameraAnimator />
+      <AdminModeController />
       <AdminCameraHelper />
     </>
   )
