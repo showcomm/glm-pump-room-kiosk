@@ -5,16 +5,13 @@
  * - Target kiosk display resolution (determines aspect ratio for all editors)
  * - Overview camera position (the "home" view visitors see)
  * 
- * These settings are interdependent - the overview camera should be captured
- * at the target aspect ratio so hotspots align correctly.
- * 
- * CRITICAL: PlayCanvas Application components must have STATIC props.
- * Camera position is set imperatively via PlayCanvas API, not React props.
- * 
- * FIX: Don't render PlayCanvas until container has non-zero dimensions.
+ * CRITICAL: Follows the same pattern as CameraCapture.tsx
+ * - Application renders immediately with module-level constants
+ * - Window events used to control camera, not props
+ * - No conditional rendering of PlayCanvas
  */
 
-import React, { useState, useEffect, useRef, memo } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat } from '@playcanvas/react/components'
@@ -24,92 +21,16 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs'
 import { useSplatData } from '../../hooks/useSplatData'
 import { updateSplatConfig } from '../../lib/api/splat'
 import { RESOLUTION_PRESETS } from '../../lib/database.types'
+import { getOverviewViewpoint } from '../../data/viewpoints'
 
 // ============================================
-// CONFIGURATION - STATIC VALUES ONLY
+// CONFIGURATION - Module level constants
 // ============================================
 const SPLAT_URL = '/pump-room.ply'
-
-// STATIC camera starting position - NEVER passed as changing props
-const STATIC_CAMERA = {
-  position: [0, 2, 5] as [number, number, number],
-  rotation: [0, 0, 0] as [number, number, number],
-  fov: 60
-}
+const INITIAL = getOverviewViewpoint()
 
 // ============================================
-// Aspect Ratio Container with ready check
-// ============================================
-function AspectRatioContainer({ 
-  width,
-  height,
-  children 
-}: { 
-  width: number
-  height: number
-  children: (ready: boolean) => React.ReactNode 
-}) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
-  const aspectRatio = width / height
-  
-  useEffect(() => {
-    const updateDimensions = () => {
-      if (!containerRef.current) return
-      
-      const parent = containerRef.current.parentElement
-      if (!parent) return
-      
-      const parentWidth = parent.clientWidth
-      const parentHeight = parent.clientHeight
-      const parentRatio = parentWidth / parentHeight
-      
-      let w: number, h: number
-      
-      if (parentRatio > aspectRatio) {
-        h = parentHeight
-        w = h * aspectRatio
-      } else {
-        w = parentWidth
-        h = w / aspectRatio
-      }
-      
-      setDimensions({ width: w, height: h })
-    }
-    
-    updateDimensions()
-    
-    const resizeObserver = new ResizeObserver(updateDimensions)
-    if (containerRef.current?.parentElement) {
-      resizeObserver.observe(containerRef.current.parentElement)
-    }
-    
-    return () => resizeObserver.disconnect()
-  }, [aspectRatio])
-  
-  const ready = dimensions.width > 0 && dimensions.height > 0
-  
-  return (
-    <div 
-      ref={containerRef}
-      className="absolute inset-0 flex items-center justify-center"
-    >
-      <div 
-        className="relative border-2 border-amber-600/50"
-        style={{ width: dimensions.width || '100%', height: dimensions.height || '100%' }}
-      >
-        {children(ready)}
-        {/* Resolution indicator */}
-        <div className="absolute top-2 left-2 bg-black/70 text-amber-500 text-xs px-2 py-1 rounded z-10">
-          {width}×{height}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ============================================
-// Splat Components - COMPLETELY STATIC
+// Splat Component
 // ============================================
 function PumpRoomSplat({ src }: { src: string }) {
   const { asset, loading, error } = useSplat(src)
@@ -121,61 +42,48 @@ function PumpRoomSplat({ src }: { src: string }) {
   )
 }
 
-// CRITICAL: NO PROPS - uses module-level constants only
-const CameraEntity = memo(function CameraEntity() {
-  return (
-    <Entity name="camera" position={STATIC_CAMERA.position} rotation={STATIC_CAMERA.rotation}>
-      <Camera clearColor="#1a1a2e" fov={STATIC_CAMERA.fov} farClip={1000} nearClip={0.01} />
-      <Script script={CameraControls} />
-    </Entity>
-  )
-})
-
-// Sets camera position imperatively after config loads
-function CameraInitializer({ 
-  position, 
-  rotation 
-}: { 
-  position: [number, number, number] | null
-  rotation: [number, number, number] | null 
-}) {
-  const app = useApp()
-  const hasInitialized = useRef(false)
-  
-  useEffect(() => {
-    if (!app || hasInitialized.current) return
-    if (!position || !rotation) return
-    
-    // Small delay to ensure camera entity exists
-    const timer = setTimeout(() => {
-      const cam = app.root.findByName('camera')
-      if (cam) {
-        cam.setLocalPosition(position[0], position[1], position[2])
-        cam.setLocalEulerAngles(rotation[0], rotation[1], rotation[2])
-        hasInitialized.current = true
-        console.log('Camera initialized to:', position, rotation)
-      }
-    }, 100)
-    
-    return () => clearTimeout(timer)
-  }, [app, position, rotation])
-  
-  return null
-}
-
-// Component that broadcasts camera position
-function CameraBroadcaster() {
+// ============================================
+// Camera Controller - listens to window events
+// ============================================
+function CameraController() {
   const app = useApp()
   const frameRef = useRef<number>()
+  const hasInitializedFromConfig = useRef(false)
   
   useEffect(() => {
     if (!app) return
     
-    const broadcast = () => {
-      const cam = app.root.findByName('camera')
-      if (cam) {
-        const pos = cam.getPosition()
-        const rot = cam.getEulerAngles()
+    // Handle command to set camera position (from config load or sidebar)
+    const handleSetTransform = (e: CustomEvent) => {
+      const cameraEntity = app.root.findByName('camera')
+      if (!cameraEntity) return
+      
+      const { position, rotation } = e.detail
+      
+      // Disable CameraControls while setting position manually
+      if (cameraEntity.script?.cameraControls) {
+        cameraEntity.script.cameraControls.enabled = false
+      }
+      
+      cameraEntity.setLocalPosition(position[0], position[1], position[2])
+      cameraEntity.setLocalEulerAngles(rotation[0], rotation[1], rotation[2])
+      
+      // Re-enable after a moment
+      setTimeout(() => {
+        if (cameraEntity.script?.cameraControls) {
+          cameraEntity.script.cameraControls.enabled = true
+        }
+      }, 100)
+    }
+    
+    window.addEventListener('set-camera-transform', handleSetTransform as EventListener)
+    
+    // Broadcast camera position to UI continuously
+    const broadcastPosition = () => {
+      const cameraEntity = app.root.findByName('camera')
+      if (cameraEntity) {
+        const pos = cameraEntity.getPosition()
+        const rot = cameraEntity.getEulerAngles()
         window.dispatchEvent(new CustomEvent('camera-update', {
           detail: {
             position: [pos.x, pos.y, pos.z],
@@ -183,11 +91,13 @@ function CameraBroadcaster() {
           }
         }))
       }
-      frameRef.current = requestAnimationFrame(broadcast)
+      frameRef.current = requestAnimationFrame(broadcastPosition)
     }
     
-    broadcast()
+    frameRef.current = requestAnimationFrame(broadcastPosition)
+    
     return () => {
+      window.removeEventListener('set-camera-transform', handleSetTransform as EventListener)
       if (frameRef.current) cancelAnimationFrame(frameRef.current)
     }
   }, [app])
@@ -195,26 +105,21 @@ function CameraBroadcaster() {
   return null
 }
 
-// The actual PlayCanvas scene - memoized with no props
-const SplatScene = memo(function SplatScene({ 
-  configPosition, 
-  configRotation 
-}: { 
-  configPosition: [number, number, number] | null
-  configRotation: [number, number, number] | null 
-}) {
+// ============================================
+// Splat Viewer - renders immediately, no props
+// ============================================
+function SplatViewer() {
   return (
     <Application graphicsDeviceOptions={{ antialias: false }}>
-      <CameraEntity />
-      <CameraInitializer 
-        position={configPosition}
-        rotation={configRotation}
-      />
+      <Entity name="camera" position={INITIAL.position} rotation={INITIAL.rotation}>
+        <Camera clearColor="#1a1a2e" fov={INITIAL.fov || 60} farClip={1000} nearClip={0.01} />
+        <Script script={CameraControls} />
+      </Entity>
       <PumpRoomSplat src={SPLAT_URL} />
-      <CameraBroadcaster />
+      <CameraController />
     </Application>
   )
-})
+}
 
 // ============================================
 // Resolution Selector
@@ -228,7 +133,6 @@ interface ResolutionSelectorProps {
 function ResolutionSelector({ width, height, onChange }: ResolutionSelectorProps) {
   const [customMode, setCustomMode] = useState(false)
   
-  // Check if current values match a preset
   const currentPreset = RESOLUTION_PRESETS.find(
     p => p.width === width && p.height === height
   )
@@ -333,7 +237,7 @@ function CameraDisplay({ position, rotation, fov, onFovChange }: CameraDisplayPr
       </div>
       
       <div>
-        <label className="block text-xs text-neutral-500 mb-1">Field of View (saved value)</label>
+        <label className="block text-xs text-neutral-500 mb-1">Field of View</label>
         <div className="flex items-center gap-2">
           <input
             type="range"
@@ -345,9 +249,6 @@ function CameraDisplay({ position, rotation, fov, onFovChange }: CameraDisplayPr
           />
           <span className="text-sm text-amber-400 w-10 text-right">{fov}°</span>
         </div>
-        <p className="text-[9px] text-neutral-600 mt-1">
-          Note: FOV changes apply on save, not live preview
-        </p>
       </div>
       
       <p className="text-[10px] text-neutral-600">
@@ -366,22 +267,19 @@ export default function DisplaySettings() {
   // Local state for editing
   const [targetWidth, setTargetWidth] = useState(1920)
   const [targetHeight, setTargetHeight] = useState(1080)
-  const [cameraPosition, setCameraPosition] = useState<[number, number, number]>(STATIC_CAMERA.position)
-  const [cameraRotation, setCameraRotation] = useState<[number, number, number]>(STATIC_CAMERA.rotation)
-  const [cameraFov, setCameraFov] = useState(STATIC_CAMERA.fov)
+  const [cameraPosition, setCameraPosition] = useState<[number, number, number]>(INITIAL.position)
+  const [cameraRotation, setCameraRotation] = useState<[number, number, number]>(INITIAL.rotation)
+  const [cameraFov, setCameraFov] = useState(INITIAL.fov || 60)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [dirty, setDirty] = useState(false)
   
-  // Config values for camera initialization (only set once)
-  const [configCamera, setConfigCamera] = useState<{
-    position: [number, number, number] | null
-    rotation: [number, number, number] | null
-  }>({ position: null, rotation: null })
+  // Track if we've initialized camera from config
+  const hasInitializedCamera = useRef(false)
   
-  // Load config values
+  // Load config values and set camera position via window event
   useEffect(() => {
-    if (config) {
+    if (config && !hasInitializedCamera.current) {
       setTargetWidth(config.target_width || 1920)
       setTargetHeight(config.target_height || 1080)
       
@@ -393,8 +291,12 @@ export default function DisplaySettings() {
       setCameraRotation(rot)
       setCameraFov(fov)
       
-      // Set config camera for initialization (only once)
-      setConfigCamera({ position: pos, rotation: rot })
+      // Set camera position via window event (not props!)
+      window.dispatchEvent(new CustomEvent('set-camera-transform', {
+        detail: { position: pos, rotation: rot }
+      }))
+      
+      hasInitializedCamera.current = true
     }
   }, [config])
   
@@ -404,8 +306,12 @@ export default function DisplaySettings() {
       const { position, rotation } = e.detail
       setCameraPosition([position[0], position[1], position[2]])
       setCameraRotation([rotation[0], rotation[1], rotation[2]])
-      setDirty(true)
-      setSaved(false)
+      
+      // Only mark dirty after initial load
+      if (hasInitializedCamera.current) {
+        setDirty(true)
+        setSaved(false)
+      }
     }
     
     window.addEventListener('camera-update', handleCameraUpdate as EventListener)
@@ -446,11 +352,20 @@ export default function DisplaySettings() {
   
   const handleReset = () => {
     if (config) {
+      const pos = config.overview_position as [number, number, number]
+      const rot = config.overview_rotation as [number, number, number]
+      
       setTargetWidth(config.target_width || 1920)
       setTargetHeight(config.target_height || 1080)
-      setCameraPosition(config.overview_position as [number, number, number])
-      setCameraRotation(config.overview_rotation as [number, number, number])
+      setCameraPosition(pos)
+      setCameraRotation(rot)
       setCameraFov(config.overview_fov || 60)
+      
+      // Reset camera via window event
+      window.dispatchEvent(new CustomEvent('set-camera-transform', {
+        detail: { position: pos, rotation: rot }
+      }))
+      
       setDirty(false)
       setSaved(false)
     }
@@ -458,24 +373,13 @@ export default function DisplaySettings() {
   
   return (
     <div className="w-screen h-screen bg-black flex">
-      {/* Viewer area */}
+      {/* Viewer area - NO conditional rendering, NO AspectRatioContainer */}
       <div className="flex-1 relative bg-neutral-950">
-        <AspectRatioContainer width={targetWidth} height={targetHeight}>
-          {(ready) => (
-            <>
-              {ready ? (
-                <SplatScene 
-                  configPosition={configCamera.position}
-                  configRotation={configCamera.rotation}
-                />
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center text-neutral-600 text-sm">
-                  Initializing...
-                </div>
-              )}
-            </>
-          )}
-        </AspectRatioContainer>
+        <SplatViewer />
+        {/* Resolution indicator overlay */}
+        <div className="absolute top-4 left-4 bg-black/70 text-amber-500 text-xs px-2 py-1 rounded z-10">
+          Target: {targetWidth}×{targetHeight}
+        </div>
       </div>
       
       {/* Sidebar */}
@@ -492,7 +396,7 @@ export default function DisplaySettings() {
         </div>
         
         {loading && (
-          <div className="p-4 bg-neutral-800 text-neutral-400 text-sm">Loading...</div>
+          <div className="p-4 bg-neutral-800 text-neutral-400 text-sm">Loading config...</div>
         )}
         {error && (
           <div className="p-4 bg-red-900/30 text-red-400 text-sm">{error}</div>
