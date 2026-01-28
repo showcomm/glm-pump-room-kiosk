@@ -516,6 +516,8 @@ function HotspotSvgOverlay({
     if (!hotspot || hotspot.shape !== 'polygon') return
     
     const bounds = hotspot.bounds as PolygonBounds
+    if (!bounds?.points) return
+    
     const newPoints = [...bounds.points]
     newPoints[vertexIndex] = newPos
     onUpdateBounds(hotspotId, { points: newPoints })
@@ -526,6 +528,8 @@ function HotspotSvgOverlay({
     if (!hotspot || hotspot.shape !== 'polygon') return
     
     const bounds = hotspot.bounds as PolygonBounds
+    if (!bounds?.points) return
+    
     const p1 = bounds.points[midpointIndex]
     const p2 = bounds.points[(midpointIndex + 1) % bounds.points.length]
     const midpoint = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
@@ -540,7 +544,7 @@ function HotspotSvgOverlay({
     if (!hotspot || hotspot.shape !== 'polygon') return
     
     const bounds = hotspot.bounds as PolygonBounds
-    if (bounds.points.length <= 3) return
+    if (!bounds?.points || bounds.points.length <= 3) return
     
     const newPoints = bounds.points.filter((_, i) => i !== vertexIndex)
     onUpdateBounds(hotspotId, { points: newPoints })
@@ -561,6 +565,7 @@ function HotspotSvgOverlay({
       {hotspots.map(hotspot => {
         if (hotspot.shape !== 'polygon') return null
         const bounds = hotspot.bounds as PolygonBounds
+        if (!bounds?.points) return null
         return (
           <PolygonShape
             key={hotspot.id}
@@ -659,7 +664,7 @@ function EditorPanel() {
   const saveTimeoutRef = useRef<number>()
   
   useEffect(() => {
-    setLocalHotspots(hotspots)
+    setLocalHotspots(hotspots ?? [])
   }, [hotspots])
   
   const handleSelectHotspot = (id: string | null) => {
@@ -687,12 +692,12 @@ function EditorPanel() {
       name_en: name,
       shape: 'polygon',
       bounds: { points: drawingPoints },
-      order_index: localHotspots.length,
+      order_index: localHotspots?.length ?? 0,
       active: true
     })
     
     if (newHotspot) {
-      setLocalHotspots(prev => [...prev, newHotspot])
+      setLocalHotspots(prev => [...(prev ?? []), newHotspot])
       setSelectedId(newHotspot.id)
     }
     
@@ -705,14 +710,14 @@ function EditorPanel() {
     setSaving(true)
     const success = await deleteHotspot(id)
     if (success) {
-      setLocalHotspots(prev => prev.filter(h => h.id !== id))
+      setLocalHotspots(prev => (prev ?? []).filter(h => h.id !== id))
       setSelectedId(null)
     }
     setSaving(false)
   }
   
   const handleUpdateBounds = (id: string, bounds: PolygonBounds) => {
-    setLocalHotspots(prev => prev.map(h => h.id === id ? { ...h, bounds } : h))
+    setLocalHotspots(prev => (prev ?? []).map(h => h.id === id ? { ...h, bounds } : h))
     
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     saveTimeoutRef.current = window.setTimeout(async () => {
@@ -729,7 +734,7 @@ function EditorPanel() {
     }
   }
   
-  const selectedHotspot = localHotspots.find(h => h.id === selectedId)
+  const selectedHotspot = localHotspots?.find(h => h.id === selectedId)
   
   return (
     <>
@@ -737,7 +742,7 @@ function EditorPanel() {
       <FrameOverlay targetWidth={targetWidth} targetHeight={targetHeight}>
         {() => (
           <HotspotSvgOverlay
-            hotspots={localHotspots.filter(h => h.shape === 'polygon')}
+            hotspots={(localHotspots ?? []).filter(h => h.shape === 'polygon')}
             selectedId={selectedId}
             onSelectHotspot={handleSelectHotspot}
             onUpdateBounds={handleUpdateBounds}
@@ -826,7 +831,7 @@ function EditorPanel() {
             <div className="flex items-center justify-between">
               <span className="text-[11px] text-amber-400">{selectedHotspot.name_en}</span>
               <span className="text-[9px] text-neutral-600">
-                {(selectedHotspot.bounds as PolygonBounds).points.length} pts
+                {(selectedHotspot.bounds as PolygonBounds)?.points?.length ?? 0} pts
               </span>
             </div>
             <p className="text-[9px] text-neutral-600 mt-1">Drag • Click edge to add • Right-click to delete</p>
@@ -856,12 +861,12 @@ function EditorPanel() {
         {/* List */}
         <div className="flex-1 overflow-y-auto p-2">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[9px] text-neutral-600">HOTSPOTS ({localHotspots.length})</span>
+            <span className="text-[9px] text-neutral-600">HOTSPOTS ({localHotspots?.length ?? 0})</span>
             {saving && <span className="text-[9px] text-amber-500">Saving...</span>}
           </div>
           
           <div className="space-y-0.5">
-            {localHotspots.map(h => (
+            {(localHotspots ?? []).map(h => (
               <button
                 key={h.id}
                 onClick={() => setSelectedId(h.id)}
@@ -875,7 +880,7 @@ function EditorPanel() {
             ))}
           </div>
           
-          {localHotspots.length === 0 && !loading && (
+          {(localHotspots?.length ?? 0) === 0 && !loading && (
             <p className="text-neutral-600 text-[10px] text-center py-3">No hotspots</p>
           )}
         </div>
