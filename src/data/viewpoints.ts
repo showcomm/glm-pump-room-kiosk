@@ -5,13 +5,10 @@
  * The 'overview' viewpoint is the default/home position.
  * 
  * HOW TO CAPTURE REAL POSITIONS:
- * 1. Run the app and triple-tap the top-left corner to enter Admin Mode
+ * 1. Go to /admin/camera-capture
  * 2. Use orbit controls to navigate to a good viewpoint for each equipment
- * 3. Click "Copy to Clipboard" to get the position/rotation values
+ * 3. Select equipment from dropdown, click "Save & Copy Code"
  * 4. Paste the values into this file
- * 
- * CURRENT STATE: Equipment viewpoints use slight zoom variations of the overview
- * position so we can test the transition mechanics. Replace with real positions.
  */
 
 export interface CameraViewpoint {
@@ -69,13 +66,13 @@ export const viewpoints: CameraViewpoint[] = [
   {
     id: 'main-engine-east-view',
     equipment_id: 'main-engine-east',
-    // TEMP: Zoom in more
-    position: [-0.005, -4.0, 0.296],
-    rotation: [87.53, -0.96, 0],
-    fov: 40,
+    // CAPTURED: Real viewpoint from admin tool
+    position: [-0.208, -4.042, -4.125],
+    rotation: [135.61, 2.89, 0.00],
+    fov: 60,
     label: {
-      en: 'East Steam Engine',
-      fr: 'Moteur à vapeur Est'
+      en: 'Main Steam Engine (East)',
+      fr: 'Moteur à vapeur principal (Est)'
     }
   },
   {
