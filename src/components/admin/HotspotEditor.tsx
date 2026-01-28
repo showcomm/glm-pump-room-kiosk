@@ -377,8 +377,12 @@ function PolygonShape({
 // Drawing Polygon
 // IMPORTANT: All elements have pointerEvents="none" so clicks pass through to SVG
 // ============================================
-function DrawingPolygon({ points, mousePos, style, aspectRatio }: { 
-  points: Point[]; mousePos: Point | null; style: HotspotStyle; aspectRatio: number
+function DrawingPolygon({ points, mousePos, style, aspectRatio, isCloseable }: { 
+  points: Point[]
+  mousePos: Point | null
+  style: HotspotStyle
+  aspectRatio: number
+  isCloseable: boolean
 }) {
   if (points.length === 0) return null
   
@@ -401,10 +405,14 @@ function DrawingPolygon({ points, mousePos, style, aspectRatio }: {
           stroke="rgba(0,0,0,0.4)" strokeWidth={0.15} pointerEvents="none" />
       ))}
       
-      {/* Close zone indicator - clicks pass through to SVG handler */}
+      {/* Close zone indicator - visual feedback when closeable */}
       {points.length >= 3 && (
         <CircleAsEllipse cx={points[0].x} cy={points[0].y} r={4.0}
-          aspectRatio={aspectRatio} fill="rgba(34, 197, 94, 0.15)" stroke="#22c55e" strokeWidth={0.2} pointerEvents="none" />
+          aspectRatio={aspectRatio} 
+          fill={isCloseable ? "rgba(34, 197, 94, 0.3)" : "rgba(34, 197, 94, 0.15)"} 
+          stroke={isCloseable ? "#4ade80" : "#22c55e"} 
+          strokeWidth={isCloseable ? 0.4 : 0.2} 
+          pointerEvents="none" />
       )}
     </g>
   )
@@ -443,27 +451,48 @@ function HotspotSvgOverlay({
     }
   }
   
+  // Check if current mouse position is close enough to close
+  const isCloseToFirstPoint = (): boolean => {
+    if (drawingPoints.length < 3 || !mousePos) return false
+    const first = drawingPoints[0]
+    // Use simple coordinate distance for close detection (no aspect ratio needed for threshold check)
+    const dx = mousePos.x - first.x
+    const dy = mousePos.y - first.y
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    console.log('[HotspotEditor] Close check - mouse:', mousePos, 'first:', first, 'dist:', dist.toFixed(2))
+    return dist < 4  // 4 SVG units threshold
+  }
+  
   const handleClick = (e: React.MouseEvent) => {
+    console.log('[HotspotEditor] handleClick called, mode:', mode)
     if (mode !== 'draw') return
     
     const pos = getMousePosition(e)
+    console.log('[HotspotEditor] Click position:', pos, 'drawingPoints.length:', drawingPoints.length)
     
     // Check if clicking near first point to close
-    // Close zone radius is 4 SVG units (shown as ellipse), threshold is 6 for easier clicking
     if (drawingPoints.length >= 3) {
       const first = drawingPoints[0]
-      const dist = visualDistance(pos, first, aspectRatio)
-      if (dist < 6) {
+      const dx = pos.x - first.x
+      const dy = pos.y - first.y
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      console.log('[HotspotEditor] Distance to first point:', dist.toFixed(2), '(threshold: 4)')
+      
+      if (dist < 4) {
+        console.log('[HotspotEditor] CLOSING POLYGON!')
         onCompleteDrawing()
         return
       }
     }
     
+    console.log('[HotspotEditor] Adding point:', pos)
     onAddDrawingPoint(pos)
   }
   
   const handleDoubleClick = () => {
+    console.log('[HotspotEditor] handleDoubleClick, mode:', mode, 'points:', drawingPoints.length)
     if (mode === 'draw' && drawingPoints.length >= 3) {
+      console.log('[HotspotEditor] Double-click closing polygon!')
       onCompleteDrawing()
     }
   }
@@ -526,7 +555,15 @@ function HotspotSvgOverlay({
       })}
       
       {/* Drawing in progress */}
-      {mode === 'draw' && <DrawingPolygon points={drawingPoints} mousePos={mousePos} style={style} aspectRatio={aspectRatio} />}
+      {mode === 'draw' && (
+        <DrawingPolygon 
+          points={drawingPoints} 
+          mousePos={mousePos} 
+          style={style} 
+          aspectRatio={aspectRatio}
+          isCloseable={isCloseToFirstPoint()}
+        />
+      )}
     </svg>
   )
 }
@@ -671,6 +708,7 @@ interface SidebarProps {
   localHotspots: ParsedSplatHotspot[]
   drawingPoints: Point[]
   setDrawingPoints: (p: Point[]) => void
+  drawingComplete: boolean
   saving: boolean
   savingStyle: boolean
   loading: boolean
@@ -684,15 +722,23 @@ interface SidebarProps {
 
 function Sidebar({
   mode, setMode, selectedId, setSelectedId,
-  localHotspots, drawingPoints, setDrawingPoints,
+  localHotspots, drawingPoints, setDrawingPoints, drawingComplete,
   saving, savingStyle, loading, error, configId,
   onCreateHotspot, onDeleteHotspot, style, setStyle
 }: SidebarProps) {
   const [newName, setNewName] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [showStyle, setShowStyle] = useState(true)
+  const nameInputRef = useRef<HTMLInputElement>(null)
   
   const selectedHotspot = localHotspots?.find(h => h.id === selectedId)
+  
+  // Auto-focus name input when drawing is complete
+  useEffect(() => {
+    if (drawingComplete && nameInputRef.current) {
+      nameInputRef.current.focus()
+    }
+  }, [drawingComplete])
   
   const handleSetMode = (newMode: EditorMode) => {
     setMode(newMode)
@@ -730,7 +776,7 @@ function Sidebar({
           </button>
         </div>
         
-        {mode === 'draw' && (
+        {mode === 'draw' && !drawingComplete && (
           <div className="mt-2 text-[10px] text-neutral-500">
             Click to place vertices. Click green circle or double-click to close.
             {drawingPoints.length > 0 && (
@@ -743,18 +789,34 @@ function Sidebar({
         )}
       </div>
       
-      {/* Save panel when drawing is ready */}
-      {mode === 'draw' && drawingPoints.length >= 3 && (
-        <div className="p-3 border-b border-neutral-700 bg-green-900/20">
-          <p className="text-[10px] text-green-400 mb-2">Ready to save ({drawingPoints.length} points)</p>
-          <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)}
-            placeholder="Hotspot name..."
-            className="w-full bg-neutral-800 border border-neutral-600 rounded px-2 py-1.5 text-xs focus:border-green-500 focus:outline-none"
-            onKeyDown={(e) => e.key === 'Enter' && handleCreate()} autoFocus />
+      {/* Save panel when drawing is complete */}
+      {mode === 'draw' && drawingComplete && (
+        <div className="p-3 border-b border-neutral-700 bg-green-900/30">
+          <p className="text-[10px] text-green-400 mb-2 font-medium">✓ Shape closed! ({drawingPoints.length} points)</p>
+          <input 
+            ref={nameInputRef}
+            type="text" 
+            value={newName} 
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="Enter hotspot name..."
+            className="w-full bg-neutral-800 border border-green-600 rounded px-2 py-1.5 text-xs focus:border-green-400 focus:outline-none"
+            onKeyDown={(e) => e.key === 'Enter' && handleCreate()} 
+          />
           <button onClick={handleCreate} disabled={!newName.trim()}
             className="w-full mt-2 bg-green-700 hover:bg-green-600 disabled:bg-neutral-700 disabled:text-neutral-500 py-1.5 rounded text-xs font-medium">
             Save Hotspot
           </button>
+          <button onClick={() => setDrawingPoints([])} 
+            className="w-full mt-1 text-neutral-500 hover:text-neutral-400 text-[10px]">
+            Cancel and start over
+          </button>
+        </div>
+      )}
+      
+      {/* Drawing in progress (not yet complete) */}
+      {mode === 'draw' && !drawingComplete && drawingPoints.length >= 3 && (
+        <div className="p-3 border-b border-neutral-700 bg-amber-900/20">
+          <p className="text-[10px] text-amber-400">Click the green circle to close the shape, or double-click anywhere.</p>
         </div>
       )}
       
@@ -855,6 +917,7 @@ export default function HotspotEditor() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [mode, setMode] = useState<EditorMode>('select')
   const [drawingPoints, setDrawingPoints] = useState<Point[]>([])
+  const [drawingComplete, setDrawingComplete] = useState(false)
   const [mousePos, setMousePos] = useState<Point | null>(null)
   const [saving, setSaving] = useState(false)
   const [savingStyle, setSavingStyle] = useState(false)
@@ -900,11 +963,20 @@ export default function HotspotEditor() {
     }, 500)
   }, [saveConfigSettings])
   
-  // Complete drawing - creates a new hotspot and prompts for name
+  // Complete drawing - mark as complete so sidebar shows save UI
   const handleCompleteDrawing = () => {
+    console.log('[HotspotEditor] handleCompleteDrawing called, points:', drawingPoints.length)
     if (drawingPoints.length < 3) return
-    // Drawing is complete, the sidebar will show the save panel
-    // User enters name there and clicks save
+    setDrawingComplete(true)
+    console.log('[HotspotEditor] Drawing marked as complete!')
+  }
+  
+  // Reset drawing state
+  const handleSetDrawingPoints = (points: Point[]) => {
+    setDrawingPoints(points)
+    if (points.length === 0) {
+      setDrawingComplete(false)
+    }
   }
   
   const handleCreateHotspot = async (name: string) => {
@@ -920,6 +992,7 @@ export default function HotspotEditor() {
       setSelectedId(newHotspot.id) 
     }
     setDrawingPoints([])
+    setDrawingComplete(false)
     setMode('select')
     setSaving(false)
   }
@@ -977,7 +1050,11 @@ export default function HotspotEditor() {
               onUpdateBounds={handleUpdateBounds}
               mode={mode}
               drawingPoints={drawingPoints}
-              onAddDrawingPoint={(p) => setDrawingPoints(prev => [...prev, p])}
+              onAddDrawingPoint={(p) => {
+                if (!drawingComplete) {
+                  setDrawingPoints(prev => [...prev, p])
+                }
+              }}
               onCompleteDrawing={handleCompleteDrawing}
               mousePos={mousePos}
               onMouseMove={setMousePos}
@@ -1003,7 +1080,8 @@ export default function HotspotEditor() {
         mode={mode} setMode={setMode}
         selectedId={selectedId} setSelectedId={setSelectedId}
         localHotspots={localHotspots}
-        drawingPoints={drawingPoints} setDrawingPoints={setDrawingPoints}
+        drawingPoints={drawingPoints} setDrawingPoints={handleSetDrawingPoints}
+        drawingComplete={drawingComplete}
         saving={saving} savingStyle={savingStyle}
         loading={loading} error={error}
         configId={config?.id ?? null}
