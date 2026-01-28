@@ -10,10 +10,10 @@
  * 
  * Admin Mode:
  * - Triple-tap top-left corner to toggle admin mode
- * - In admin mode, use SplatTest.tsx for camera capture (change import in main.tsx)
+ * - In admin mode, free orbit controls enabled for position capture
  */
 
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat, Script } from '@playcanvas/react/components'
 import { useSplat, useApp } from '@playcanvas/react/hooks'
@@ -119,14 +119,9 @@ function AdminCameraHelper() {
 
 // ============================================
 // Animated Camera - Handles smooth transitions
+// Uses local state for position so React stays in sync with animation
 // ============================================
 function AnimatedCamera() {
-  const app = useApp()
-  const animationRef = useRef<number>()
-  const startTimeRef = useRef<number>(0)
-  const startPosRef = useRef<[number, number, number]>([0, 0, 0])
-  const startRotRef = useRef<[number, number, number]>([0, 0, 0])
-  
   const { 
     currentViewpoint, 
     targetViewpoint, 
@@ -134,6 +129,17 @@ function AnimatedCamera() {
     completeTransition,
     isAdminMode
   } = useKioskStore()
+  
+  // Local state for animated position - this drives the Entity props
+  const [animatedPos, setAnimatedPos] = useState<[number, number, number]>(currentViewpoint.position)
+  const [animatedRot, setAnimatedRot] = useState<[number, number, number]>(currentViewpoint.rotation)
+  const [animatedFov, setAnimatedFov] = useState<number>(currentViewpoint.fov || 60)
+  
+  const animationRef = useRef<number>()
+  const startTimeRef = useRef<number>(0)
+  const startPosRef = useRef<[number, number, number]>(currentViewpoint.position)
+  const startRotRef = useRef<[number, number, number]>(currentViewpoint.rotation)
+  const startFovRef = useRef<number>(currentViewpoint.fov || 60)
   
   // Easing function for smooth animation
   const easeInOutCubic = (t: number): number => {
@@ -147,54 +153,53 @@ function AnimatedCamera() {
     return start + (end - start) * t
   }
   
-  // Animation loop
+  // Animation loop - updates local state instead of manipulating entity directly
   const animate = useCallback(() => {
-    if (!app || !targetViewpoint) return
-    
-    const cameraEntity = app.root.findByName('camera')
-    if (!cameraEntity) return
+    if (!targetViewpoint) return
     
     const elapsed = Date.now() - startTimeRef.current
     const progress = Math.min(elapsed / TRANSITION_DURATION_MS, 1)
     const easedProgress = easeInOutCubic(progress)
     
     // Interpolate position
-    const newPos = [
+    const newPos: [number, number, number] = [
       lerp(startPosRef.current[0], targetViewpoint.position[0], easedProgress),
       lerp(startPosRef.current[1], targetViewpoint.position[1], easedProgress),
       lerp(startPosRef.current[2], targetViewpoint.position[2], easedProgress)
     ]
     
-    // Interpolate rotation (simple lerp - works for small angles)
-    const newRot = [
+    // Interpolate rotation
+    const newRot: [number, number, number] = [
       lerp(startRotRef.current[0], targetViewpoint.rotation[0], easedProgress),
       lerp(startRotRef.current[1], targetViewpoint.rotation[1], easedProgress),
       lerp(startRotRef.current[2], targetViewpoint.rotation[2], easedProgress)
     ]
     
-    cameraEntity.setLocalPosition(newPos[0], newPos[1], newPos[2])
-    cameraEntity.setLocalEulerAngles(newRot[0], newRot[1], newRot[2])
+    // Interpolate FOV
+    const targetFov = targetViewpoint.fov || 60
+    const newFov = lerp(startFovRef.current, targetFov, easedProgress)
+    
+    // Update local state - this triggers React re-render with new position
+    setAnimatedPos(newPos)
+    setAnimatedRot(newRot)
+    setAnimatedFov(newFov)
     
     if (progress < 1) {
       animationRef.current = requestAnimationFrame(animate)
     } else {
       completeTransition()
     }
-  }, [app, targetViewpoint, completeTransition])
+  }, [targetViewpoint, completeTransition])
   
-  // Start animation when target changes (only in visitor mode)
+  // Start animation when target changes
   useEffect(() => {
-    if (isAdminMode) return // Don't animate in admin mode
-    if (!isTransitioning || !targetViewpoint || !app) return
+    if (isAdminMode) return
+    if (!isTransitioning || !targetViewpoint) return
     
-    const cameraEntity = app.root.findByName('camera')
-    if (!cameraEntity) return
-    
-    // Store starting position
-    const pos = cameraEntity.getLocalPosition()
-    const rot = cameraEntity.getLocalEulerAngles()
-    startPosRef.current = [pos.x, pos.y, pos.z]
-    startRotRef.current = [rot.x, rot.y, rot.z]
+    // Store starting values from current animated state
+    startPosRef.current = animatedPos
+    startRotRef.current = animatedRot
+    startFovRef.current = animatedFov
     startTimeRef.current = Date.now()
     
     // Start animation
@@ -205,17 +210,26 @@ function AnimatedCamera() {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [isTransitioning, targetViewpoint, app, animate, isAdminMode])
+  }, [isTransitioning, targetViewpoint, isAdminMode, animate])
+  
+  // Sync animated state when viewpoint changes externally (e.g., on initial load)
+  useEffect(() => {
+    if (!isTransitioning) {
+      setAnimatedPos(currentViewpoint.position)
+      setAnimatedRot(currentViewpoint.rotation)
+      setAnimatedFov(currentViewpoint.fov || 60)
+    }
+  }, [currentViewpoint, isTransitioning])
   
   return (
     <Entity 
       name="camera" 
-      position={currentViewpoint.position}
-      rotation={currentViewpoint.rotation}
+      position={animatedPos}
+      rotation={animatedRot}
     >
       <Camera 
         clearColor="#1a1a2e"
-        fov={currentViewpoint.fov || 60}
+        fov={animatedFov}
         farClip={1000}
         nearClip={0.01}
       />
@@ -229,7 +243,7 @@ function AnimatedCamera() {
 // Admin Camera Info Panel
 // ============================================
 function AdminCameraPanel() {
-  const { isAdminMode, language } = useKioskStore()
+  const { isAdminMode } = useKioskStore()
   const [cameraData, setCameraData] = useState({ pos: [0, 0, 0], rot: [0, 0, 0] })
   
   useEffect(() => {
@@ -264,9 +278,6 @@ function AdminCameraPanel() {
     </div>
   )
 }
-
-// Need useState for AdminCameraPanel
-import { useState } from 'react'
 
 // ============================================
 // Main Interactive Viewer Component
