@@ -1,19 +1,11 @@
 /**
  * Interactive Viewer - Main kiosk experience
  * 
- * This component replaces SplatTest for the visitor-facing kiosk.
- * Key differences from SplatTest:
- * - NO free camera controls (CameraControls script removed)
- * - Camera position driven entirely by state
- * - Smooth animated transitions between viewpoints
- * - Hotspot overlay for touch interaction
- * 
- * Admin Mode:
- * - Triple-tap top-left corner to toggle admin mode
- * - In admin mode, free orbit controls enabled for position capture
+ * CRITICAL: PlayCanvas components must stay STABLE - no prop changes that cause re-renders.
+ * All camera animation is done imperatively via the PlayCanvas API.
  */
 
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Application, Entity } from '@playcanvas/react'
 import { Camera, GSplat, Script } from '@playcanvas/react/components'
 import { useSplat, useApp } from '@playcanvas/react/hooks'
@@ -25,6 +17,7 @@ import { NavigationBar } from './NavigationBar'
 import { IdleOverlay } from './IdleOverlay'
 import { FrameOverlay } from './FrameOverlay'
 import { AdminToggle } from './AdminToggle'
+import { getOverviewViewpoint } from '../../data/viewpoints'
 
 // ============================================
 // CONFIGURATION
@@ -33,8 +26,11 @@ const SPLAT_URL = '/pump-room.ply'
 const FRAME_WIDTH = 24
 const TRANSITION_DURATION_MS = 1200
 
+// Static initial position - these props NEVER change
+const INITIAL = getOverviewViewpoint()
+
 // ============================================
-// Splat Component
+// Splat Component - completely static, no store access
 // ============================================
 function PumpRoomSplat({ src }: { src: string }) {
   const { asset, loading, error } = useSplat(src)
@@ -56,11 +52,89 @@ function PumpRoomSplat({ src }: { src: string }) {
 }
 
 // ============================================
-// Admin Camera Capture Helper
+// Camera Animator - handles transitions imperatively
+// Subscribes to store but does NOT affect Entity props
+// ============================================
+function CameraAnimator() {
+  const app = useApp()
+  const animationRef = useRef<number>()
+  const startTimeRef = useRef<number>(0)
+  const startPosRef = useRef({ x: INITIAL.position[0], y: INITIAL.position[1], z: INITIAL.position[2] })
+  const startRotRef = useRef({ x: INITIAL.rotation[0], y: INITIAL.rotation[1], z: INITIAL.rotation[2] })
+  
+  const targetViewpoint = useKioskStore(state => state.targetViewpoint)
+  const isTransitioning = useKioskStore(state => state.isTransitioning)
+  const completeTransition = useKioskStore(state => state.completeTransition)
+  const isAdminMode = useKioskStore(state => state.isAdminMode)
+  
+  // Easing function
+  const easeInOutCubic = (t: number): number => {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+  }
+  
+  // Lerp helper
+  const lerp = (start: number, end: number, t: number): number => {
+    return start + (end - start) * t
+  }
+  
+  useEffect(() => {
+    if (isAdminMode) return
+    if (!isTransitioning || !targetViewpoint || !app) return
+    
+    const cameraEntity = app.root.findByName('camera')
+    if (!cameraEntity) {
+      console.error('Camera entity not found')
+      return
+    }
+    
+    // Capture starting position
+    const currentPos = cameraEntity.getLocalPosition()
+    const currentRot = cameraEntity.getLocalEulerAngles()
+    startPosRef.current = { x: currentPos.x, y: currentPos.y, z: currentPos.z }
+    startRotRef.current = { x: currentRot.x, y: currentRot.y, z: currentRot.z }
+    startTimeRef.current = Date.now()
+    
+    const animate = () => {
+      const elapsed = Date.now() - startTimeRef.current
+      const progress = Math.min(elapsed / TRANSITION_DURATION_MS, 1)
+      const t = easeInOutCubic(progress)
+      
+      const newX = lerp(startPosRef.current.x, targetViewpoint.position[0], t)
+      const newY = lerp(startPosRef.current.y, targetViewpoint.position[1], t)
+      const newZ = lerp(startPosRef.current.z, targetViewpoint.position[2], t)
+      
+      const newRotX = lerp(startRotRef.current.x, targetViewpoint.rotation[0], t)
+      const newRotY = lerp(startRotRef.current.y, targetViewpoint.rotation[1], t)
+      const newRotZ = lerp(startRotRef.current.z, targetViewpoint.rotation[2], t)
+      
+      cameraEntity.setLocalPosition(newX, newY, newZ)
+      cameraEntity.setLocalEulerAngles(newRotX, newRotY, newRotZ)
+      
+      if (progress < 1) {
+        animationRef.current = requestAnimationFrame(animate)
+      } else {
+        completeTransition()
+      }
+    }
+    
+    animationRef.current = requestAnimationFrame(animate)
+    
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current)
+      }
+    }
+  }, [isTransitioning, targetViewpoint, app, completeTransition, isAdminMode])
+  
+  return null
+}
+
+// ============================================
+// Admin Camera Helper - for capturing positions
 // ============================================
 function AdminCameraHelper() {
   const app = useApp()
-  const { isAdminMode } = useKioskStore()
+  const isAdminMode = useKioskStore(state => state.isAdminMode)
   const frameRef = useRef<number>()
   
   useEffect(() => {
@@ -79,26 +153,19 @@ function AdminCameraHelper() {
       }
     }
     
-    // Expose to window for console access
     ;(window as any).captureCamera = () => {
       const data = getCameraData()
       if (data) {
         const code = `{
-  id: 'viewpoint-name',
-  equipment_id: 'equipment-id',
   position: [${data.pos.map(v => v.toFixed(3)).join(', ')}],
   rotation: [${data.rot.map(v => v.toFixed(2)).join(', ')}],
-  fov: 60,
-  label: { en: 'English Label', fr: 'French Label' }
 }`
-        console.log('Camera viewpoint code:', code)
+        console.log('Camera:', code)
         navigator.clipboard.writeText(code)
-        console.log('Copied to clipboard!')
       }
       return data
     }
     
-    // Broadcast live updates
     const updateLoop = () => {
       const data = getCameraData()
       if (data) {
@@ -118,137 +185,14 @@ function AdminCameraHelper() {
 }
 
 // ============================================
-// Animated Camera - Handles smooth transitions
-// Uses local state for position so React stays in sync with animation
-// ============================================
-function AnimatedCamera() {
-  const { 
-    currentViewpoint, 
-    targetViewpoint, 
-    isTransitioning,
-    completeTransition,
-    isAdminMode
-  } = useKioskStore()
-  
-  // Local state for animated position - this drives the Entity props
-  const [animatedPos, setAnimatedPos] = useState<[number, number, number]>(currentViewpoint.position)
-  const [animatedRot, setAnimatedRot] = useState<[number, number, number]>(currentViewpoint.rotation)
-  const [animatedFov, setAnimatedFov] = useState<number>(currentViewpoint.fov || 60)
-  
-  const animationRef = useRef<number>()
-  const startTimeRef = useRef<number>(0)
-  const startPosRef = useRef<[number, number, number]>(currentViewpoint.position)
-  const startRotRef = useRef<[number, number, number]>(currentViewpoint.rotation)
-  const startFovRef = useRef<number>(currentViewpoint.fov || 60)
-  
-  // Easing function for smooth animation
-  const easeInOutCubic = (t: number): number => {
-    return t < 0.5 
-      ? 4 * t * t * t 
-      : 1 - Math.pow(-2 * t + 2, 3) / 2
-  }
-  
-  // Lerp helper
-  const lerp = (start: number, end: number, t: number): number => {
-    return start + (end - start) * t
-  }
-  
-  // Animation loop - updates local state instead of manipulating entity directly
-  const animate = useCallback(() => {
-    if (!targetViewpoint) return
-    
-    const elapsed = Date.now() - startTimeRef.current
-    const progress = Math.min(elapsed / TRANSITION_DURATION_MS, 1)
-    const easedProgress = easeInOutCubic(progress)
-    
-    // Interpolate position
-    const newPos: [number, number, number] = [
-      lerp(startPosRef.current[0], targetViewpoint.position[0], easedProgress),
-      lerp(startPosRef.current[1], targetViewpoint.position[1], easedProgress),
-      lerp(startPosRef.current[2], targetViewpoint.position[2], easedProgress)
-    ]
-    
-    // Interpolate rotation
-    const newRot: [number, number, number] = [
-      lerp(startRotRef.current[0], targetViewpoint.rotation[0], easedProgress),
-      lerp(startRotRef.current[1], targetViewpoint.rotation[1], easedProgress),
-      lerp(startRotRef.current[2], targetViewpoint.rotation[2], easedProgress)
-    ]
-    
-    // Interpolate FOV
-    const targetFov = targetViewpoint.fov || 60
-    const newFov = lerp(startFovRef.current, targetFov, easedProgress)
-    
-    // Update local state - this triggers React re-render with new position
-    setAnimatedPos(newPos)
-    setAnimatedRot(newRot)
-    setAnimatedFov(newFov)
-    
-    if (progress < 1) {
-      animationRef.current = requestAnimationFrame(animate)
-    } else {
-      completeTransition()
-    }
-  }, [targetViewpoint, completeTransition])
-  
-  // Start animation when target changes
-  useEffect(() => {
-    if (isAdminMode) return
-    if (!isTransitioning || !targetViewpoint) return
-    
-    // Store starting values from current animated state
-    startPosRef.current = animatedPos
-    startRotRef.current = animatedRot
-    startFovRef.current = animatedFov
-    startTimeRef.current = Date.now()
-    
-    // Start animation
-    animationRef.current = requestAnimationFrame(animate)
-    
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current)
-      }
-    }
-  }, [isTransitioning, targetViewpoint, isAdminMode, animate])
-  
-  // Sync animated state when viewpoint changes externally (e.g., on initial load)
-  useEffect(() => {
-    if (!isTransitioning) {
-      setAnimatedPos(currentViewpoint.position)
-      setAnimatedRot(currentViewpoint.rotation)
-      setAnimatedFov(currentViewpoint.fov || 60)
-    }
-  }, [currentViewpoint, isTransitioning])
-  
-  return (
-    <Entity 
-      name="camera" 
-      position={animatedPos}
-      rotation={animatedRot}
-    >
-      <Camera 
-        clearColor="#1a1a2e"
-        fov={animatedFov}
-        farClip={1000}
-        nearClip={0.01}
-      />
-      {/* In admin mode, enable free camera controls for position capture */}
-      {isAdminMode && <Script script={CameraControls} />}
-    </Entity>
-  )
-}
-
-// ============================================
-// Admin Camera Info Panel
+// Admin Camera Panel
 // ============================================
 function AdminCameraPanel() {
-  const { isAdminMode } = useKioskStore()
+  const isAdminMode = useKioskStore(state => state.isAdminMode)
   const [cameraData, setCameraData] = useState({ pos: [0, 0, 0], rot: [0, 0, 0] })
   
   useEffect(() => {
     if (!isAdminMode) return
-    
     const handler = (e: CustomEvent) => setCameraData(e.detail)
     window.addEventListener('camera-update', handler as EventListener)
     return () => window.removeEventListener('camera-update', handler as EventListener)
@@ -256,26 +200,58 @@ function AdminCameraPanel() {
   
   if (!isAdminMode) return null
   
-  const formatNum = (v: number) => v.toFixed(3)
-  
   return (
     <div 
       className="absolute z-40 bg-black/90 text-white p-4 rounded-lg font-mono text-sm"
       style={{ top: FRAME_WIDTH + 50, left: FRAME_WIDTH + 16 }}
     >
-      <div className="text-yellow-400 mb-2">Camera Position (Live)</div>
-      <div>Pos: [{cameraData.pos.map(formatNum).join(', ')}]</div>
-      <div>Rot: [{cameraData.rot.map(v => v.toFixed(2)).join(', ')}]</div>
+      <div className="text-yellow-400 mb-2">Camera Position</div>
+      <div>Pos: [{cameraData.pos.map(v => v.toFixed(2)).join(', ')}]</div>
+      <div>Rot: [{cameraData.rot.map(v => v.toFixed(1)).join(', ')}]</div>
       <button
         onClick={() => (window as any).captureCamera?.()}
         className="mt-3 w-full bg-blue-600 hover:bg-blue-500 py-2 rounded"
       >
         Copy to Clipboard
       </button>
-      <div className="text-gray-500 text-xs mt-2">
-        Console: captureCamera()
-      </div>
     </div>
+  )
+}
+
+// ============================================
+// Static Camera Entity - props NEVER change
+// ============================================
+function StaticCamera() {
+  const isAdminMode = useKioskStore(state => state.isAdminMode)
+  
+  return (
+    <Entity 
+      name="camera" 
+      position={INITIAL.position}
+      rotation={INITIAL.rotation}
+    >
+      <Camera 
+        clearColor="#1a1a2e"
+        fov={60}
+        farClip={1000}
+        nearClip={0.01}
+      />
+      {isAdminMode && <Script script={CameraControls} />}
+    </Entity>
+  )
+}
+
+// ============================================
+// PlayCanvas Scene - isolated from UI state changes
+// ============================================
+function Scene() {
+  return (
+    <>
+      <StaticCamera />
+      <PumpRoomSplat src={SPLAT_URL} />
+      <CameraAnimator />
+      <AdminCameraHelper />
+    </>
   )
 }
 
@@ -283,26 +259,22 @@ function AdminCameraPanel() {
 // Main Interactive Viewer Component
 // ============================================
 export function InteractiveViewer() {
-  const { isIdle, isAdminMode, recordInteraction } = useKioskStore()
+  const isIdle = useKioskStore(state => state.isIdle)
+  const isAdminMode = useKioskStore(state => state.isAdminMode)
+  const recordInteraction = useKioskStore(state => state.recordInteraction)
   
-  // Idle timeout checker
   useEffect(() => {
     const interval = setInterval(checkIdleTimeout, 5000)
     return () => clearInterval(interval)
   }, [])
   
-  // Record any touch/click as interaction
-  const handleInteraction = () => {
-    recordInteraction()
-  }
-  
   return (
     <div 
       className="w-screen h-screen bg-black relative"
-      onClick={handleInteraction}
-      onTouchStart={handleInteraction}
+      onClick={recordInteraction}
+      onTouchStart={recordInteraction}
     >
-      {/* PlayCanvas Application - inset from edges */}
+      {/* PlayCanvas Application - completely isolated */}
       <div 
         className="absolute" 
         style={{ 
@@ -313,31 +285,17 @@ export function InteractiveViewer() {
         }}
       >
         <Application graphicsDeviceOptions={{ antialias: false }}>
-          <AnimatedCamera />
-          <PumpRoomSplat src={SPLAT_URL} />
-          <AdminCameraHelper />
+          <Scene />
         </Application>
       </div>
 
-      {/* Hotspot overlay - touchable regions (hidden in admin mode) */}
+      {/* UI Layer - changes here won't affect PlayCanvas */}
       {!isAdminMode && <HotspotOverlay frameWidth={FRAME_WIDTH} />}
-
-      {/* Frame overlay - decorative border */}
       <FrameOverlay frameWidth={FRAME_WIDTH} />
-
-      {/* Info panel - shows when equipment selected (hidden in admin mode) */}
       {!isAdminMode && <InfoPanel frameWidth={FRAME_WIDTH} />}
-
-      {/* Navigation bar - home button, language toggle */}
       <NavigationBar frameWidth={FRAME_WIDTH} />
-
-      {/* Admin toggle - triple-tap top-left to activate */}
       <AdminToggle frameWidth={FRAME_WIDTH} />
-      
-      {/* Admin camera panel */}
       <AdminCameraPanel />
-
-      {/* Idle/Attract overlay (hidden in admin mode) */}
       {isIdle && !isAdminMode && <IdleOverlay />}
     </div>
   )
