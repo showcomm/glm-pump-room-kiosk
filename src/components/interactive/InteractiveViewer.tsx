@@ -7,18 +7,24 @@
  * - Camera position driven entirely by state
  * - Smooth animated transitions between viewpoints
  * - Hotspot overlay for touch interaction
+ * 
+ * Admin Mode:
+ * - Triple-tap top-left corner to toggle admin mode
+ * - In admin mode, use SplatTest.tsx for camera capture (change import in main.tsx)
  */
 
 import { useEffect, useRef, useCallback } from 'react'
 import { Application, Entity } from '@playcanvas/react'
-import { Camera, GSplat } from '@playcanvas/react/components'
+import { Camera, GSplat, Script } from '@playcanvas/react/components'
 import { useSplat, useApp } from '@playcanvas/react/hooks'
+import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs'
 import { useKioskStore, checkIdleTimeout } from '../../store/kioskStore'
 import { HotspotOverlay } from './HotspotOverlay'
 import { InfoPanel } from './InfoPanel'
 import { NavigationBar } from './NavigationBar'
 import { IdleOverlay } from './IdleOverlay'
 import { FrameOverlay } from './FrameOverlay'
+import { AdminToggle } from './AdminToggle'
 
 // ============================================
 // CONFIGURATION
@@ -50,6 +56,68 @@ function PumpRoomSplat({ src }: { src: string }) {
 }
 
 // ============================================
+// Admin Camera Capture Helper
+// ============================================
+function AdminCameraHelper() {
+  const app = useApp()
+  const { isAdminMode } = useKioskStore()
+  const frameRef = useRef<number>()
+  
+  useEffect(() => {
+    if (!app || !isAdminMode) return
+    
+    const getCameraData = () => {
+      const cameraEntity = app.root.findByName('camera')
+      if (!cameraEntity) return null
+      
+      const pos = cameraEntity.getLocalPosition()
+      const rot = cameraEntity.getLocalEulerAngles()
+      
+      return {
+        pos: [pos.x, pos.y, pos.z],
+        rot: [rot.x, rot.y, rot.z]
+      }
+    }
+    
+    // Expose to window for console access
+    ;(window as any).captureCamera = () => {
+      const data = getCameraData()
+      if (data) {
+        const code = `{
+  id: 'viewpoint-name',
+  equipment_id: 'equipment-id',
+  position: [${data.pos.map(v => v.toFixed(3)).join(', ')}],
+  rotation: [${data.rot.map(v => v.toFixed(2)).join(', ')}],
+  fov: 60,
+  label: { en: 'English Label', fr: 'French Label' }
+}`
+        console.log('Camera viewpoint code:', code)
+        navigator.clipboard.writeText(code)
+        console.log('Copied to clipboard!')
+      }
+      return data
+    }
+    
+    // Broadcast live updates
+    const updateLoop = () => {
+      const data = getCameraData()
+      if (data) {
+        window.dispatchEvent(new CustomEvent('camera-update', { detail: data }))
+      }
+      frameRef.current = requestAnimationFrame(updateLoop)
+    }
+    frameRef.current = requestAnimationFrame(updateLoop)
+    
+    return () => {
+      delete (window as any).captureCamera
+      if (frameRef.current) cancelAnimationFrame(frameRef.current)
+    }
+  }, [app, isAdminMode])
+  
+  return null
+}
+
+// ============================================
 // Animated Camera - Handles smooth transitions
 // ============================================
 function AnimatedCamera() {
@@ -63,7 +131,8 @@ function AnimatedCamera() {
     currentViewpoint, 
     targetViewpoint, 
     isTransitioning,
-    completeTransition 
+    completeTransition,
+    isAdminMode
   } = useKioskStore()
   
   // Easing function for smooth animation
@@ -113,8 +182,9 @@ function AnimatedCamera() {
     }
   }, [app, targetViewpoint, completeTransition])
   
-  // Start animation when target changes
+  // Start animation when target changes (only in visitor mode)
   useEffect(() => {
+    if (isAdminMode) return // Don't animate in admin mode
     if (!isTransitioning || !targetViewpoint || !app) return
     
     const cameraEntity = app.root.findByName('camera')
@@ -135,7 +205,7 @@ function AnimatedCamera() {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [isTransitioning, targetViewpoint, app, animate])
+  }, [isTransitioning, targetViewpoint, app, animate, isAdminMode])
   
   return (
     <Entity 
@@ -149,16 +219,60 @@ function AnimatedCamera() {
         farClip={1000}
         nearClip={0.01}
       />
-      {/* NO CameraControls script - camera is state-driven */}
+      {/* In admin mode, enable free camera controls for position capture */}
+      {isAdminMode && <Script script={CameraControls} />}
     </Entity>
   )
 }
 
 // ============================================
+// Admin Camera Info Panel
+// ============================================
+function AdminCameraPanel() {
+  const { isAdminMode, language } = useKioskStore()
+  const [cameraData, setCameraData] = useState({ pos: [0, 0, 0], rot: [0, 0, 0] })
+  
+  useEffect(() => {
+    if (!isAdminMode) return
+    
+    const handler = (e: CustomEvent) => setCameraData(e.detail)
+    window.addEventListener('camera-update', handler as EventListener)
+    return () => window.removeEventListener('camera-update', handler as EventListener)
+  }, [isAdminMode])
+  
+  if (!isAdminMode) return null
+  
+  const formatNum = (v: number) => v.toFixed(3)
+  
+  return (
+    <div 
+      className="absolute z-40 bg-black/90 text-white p-4 rounded-lg font-mono text-sm"
+      style={{ top: FRAME_WIDTH + 50, left: FRAME_WIDTH + 16 }}
+    >
+      <div className="text-yellow-400 mb-2">Camera Position (Live)</div>
+      <div>Pos: [{cameraData.pos.map(formatNum).join(', ')}]</div>
+      <div>Rot: [{cameraData.rot.map(v => v.toFixed(2)).join(', ')}]</div>
+      <button
+        onClick={() => (window as any).captureCamera?.()}
+        className="mt-3 w-full bg-blue-600 hover:bg-blue-500 py-2 rounded"
+      >
+        Copy to Clipboard
+      </button>
+      <div className="text-gray-500 text-xs mt-2">
+        Console: captureCamera()
+      </div>
+    </div>
+  )
+}
+
+// Need useState for AdminCameraPanel
+import { useState } from 'react'
+
+// ============================================
 // Main Interactive Viewer Component
 // ============================================
 export function InteractiveViewer() {
-  const { isIdle, recordInteraction } = useKioskStore()
+  const { isIdle, isAdminMode, recordInteraction } = useKioskStore()
   
   // Idle timeout checker
   useEffect(() => {
@@ -190,23 +304,30 @@ export function InteractiveViewer() {
         <Application graphicsDeviceOptions={{ antialias: false }}>
           <AnimatedCamera />
           <PumpRoomSplat src={SPLAT_URL} />
+          <AdminCameraHelper />
         </Application>
       </div>
 
-      {/* Hotspot overlay - touchable regions */}
-      <HotspotOverlay frameWidth={FRAME_WIDTH} />
+      {/* Hotspot overlay - touchable regions (hidden in admin mode) */}
+      {!isAdminMode && <HotspotOverlay frameWidth={FRAME_WIDTH} />}
 
       {/* Frame overlay - decorative border */}
       <FrameOverlay frameWidth={FRAME_WIDTH} />
 
-      {/* Info panel - shows when equipment selected */}
-      <InfoPanel frameWidth={FRAME_WIDTH} />
+      {/* Info panel - shows when equipment selected (hidden in admin mode) */}
+      {!isAdminMode && <InfoPanel frameWidth={FRAME_WIDTH} />}
 
       {/* Navigation bar - home button, language toggle */}
       <NavigationBar frameWidth={FRAME_WIDTH} />
 
-      {/* Idle/Attract overlay */}
-      {isIdle && <IdleOverlay />}
+      {/* Admin toggle - triple-tap top-left to activate */}
+      <AdminToggle frameWidth={FRAME_WIDTH} />
+      
+      {/* Admin camera panel */}
+      <AdminCameraPanel />
+
+      {/* Idle/Attract overlay (hidden in admin mode) */}
+      {isIdle && !isAdminMode && <IdleOverlay />}
     </div>
   )
 }
