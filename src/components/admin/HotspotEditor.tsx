@@ -3,6 +3,9 @@
  * 
  * CRITICAL: PlayCanvas Application must be COMPLETELY ISOLATED from React state.
  * The SplatScene component is memoized and has NO props that change.
+ * 
+ * ASPECT RATIO: Locked to kiosk resolution (16:9) so hotspot coordinates
+ * match between admin editor and deployed kiosk regardless of browser size.
  */
 
 import React, { useState, useEffect, useRef, memo } from 'react'
@@ -18,6 +21,9 @@ import { createHotspot, deleteHotspot } from '../../lib/api/splat'
 // CONFIGURATION
 // ============================================
 const SPLAT_URL = '/pump-room.ply'
+
+// Kiosk display: Beetronic 24" HD = 1920x1080 (16:9)
+const KIOSK_ASPECT_RATIO = 16 / 9
 
 const OVERVIEW = {
   position: [-0.005, -6.86, 0.296] as [number, number, number],
@@ -42,6 +48,74 @@ interface Point {
 }
 
 type EditorMode = 'select' | 'draw'
+
+// ============================================
+// Aspect Ratio Container
+// Maintains exact kiosk aspect ratio with letterboxing
+// ============================================
+function AspectRatioContainer({ 
+  aspectRatio, 
+  children 
+}: { 
+  aspectRatio: number
+  children: React.ReactNode 
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
+  
+  useEffect(() => {
+    const updateDimensions = () => {
+      if (!containerRef.current) return
+      
+      const parent = containerRef.current.parentElement
+      if (!parent) return
+      
+      const parentWidth = parent.clientWidth
+      const parentHeight = parent.clientHeight
+      const parentRatio = parentWidth / parentHeight
+      
+      let width: number, height: number
+      
+      if (parentRatio > aspectRatio) {
+        // Parent is wider than target - fit to height, letterbox sides
+        height = parentHeight
+        width = height * aspectRatio
+      } else {
+        // Parent is taller than target - fit to width, letterbox top/bottom
+        width = parentWidth
+        height = width / aspectRatio
+      }
+      
+      setDimensions({ width, height })
+    }
+    
+    updateDimensions()
+    
+    const resizeObserver = new ResizeObserver(updateDimensions)
+    if (containerRef.current?.parentElement) {
+      resizeObserver.observe(containerRef.current.parentElement)
+    }
+    
+    return () => resizeObserver.disconnect()
+  }, [aspectRatio])
+  
+  return (
+    <div 
+      ref={containerRef}
+      className="absolute inset-0 flex items-center justify-center"
+    >
+      <div 
+        style={{ 
+          width: dimensions.width, 
+          height: dimensions.height,
+          position: 'relative'
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
 
 // ============================================
 // Splat Components
@@ -532,6 +606,7 @@ function Sidebar({
           ← Admin
         </Link>
         <h1 className="text-sm font-medium text-neutral-200 mt-0.5">Hotspot Editor</h1>
+        <p className="text-[9px] text-neutral-600 mt-0.5">16:9 aspect ratio locked</p>
       </div>
       
       {loading && <div className="p-2 bg-neutral-800 text-neutral-400 text-[10px]">Loading...</div>}
@@ -652,7 +727,6 @@ function Sidebar({
       {/* Footer */}
       <div className="p-2 border-t border-neutral-800 text-[9px] text-neutral-700">
         <div>{configId ? `Config: ${configId.slice(0,8)}` : <span className="text-red-400">No config</span>}</div>
-        <div className="text-neutral-800 mt-0.5">Kiosk uses hardcoded data until Phase 5</div>
       </div>
     </div>
   )
@@ -744,21 +818,24 @@ export default function HotspotEditor() {
   
   return (
     <div className="w-screen h-screen bg-black flex">
-      <div className="flex-1 relative">
-        <SplatScene />
-        <Overlay
-          hotspots={localHotspots.filter(h => h.shape === 'polygon')}
-          selectedId={selectedId}
-          onSelectHotspot={handleSelectHotspot}
-          onUpdateBounds={handleUpdateBounds}
-          mode={mode}
-          drawingPoints={drawingPoints}
-          onAddDrawingPoint={(p) => setDrawingPoints(prev => [...prev, p])}
-          onCompleteDrawing={() => {}}
-          mousePos={mousePos}
-          onMouseMove={setMousePos}
-          style={style}
-        />
+      {/* Viewer area with fixed aspect ratio */}
+      <div className="flex-1 relative bg-neutral-950">
+        <AspectRatioContainer aspectRatio={KIOSK_ASPECT_RATIO}>
+          <SplatScene />
+          <Overlay
+            hotspots={localHotspots.filter(h => h.shape === 'polygon')}
+            selectedId={selectedId}
+            onSelectHotspot={handleSelectHotspot}
+            onUpdateBounds={handleUpdateBounds}
+            mode={mode}
+            drawingPoints={drawingPoints}
+            onAddDrawingPoint={(p) => setDrawingPoints(prev => [...prev, p])}
+            onCompleteDrawing={() => {}}
+            mousePos={mousePos}
+            onMouseMove={setMousePos}
+            style={style}
+          />
+        </AspectRatioContainer>
       </div>
       
       <Sidebar
