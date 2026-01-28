@@ -7,6 +7,11 @@
  * - Frame overlay shows the target aspect ratio viewport
  * - Hotspot SVG positioned within the frame overlay
  * - This ensures hotspot coordinates (0-100%) map correctly
+ * 
+ * COORDINATE SYSTEM:
+ * - Stored coordinates are 0-100 percentages in both X and Y
+ * - SVG viewBox matches aspect ratio to prevent circle squishing
+ * - X coords scaled by aspect ratio for rendering, unscaled for storage
  */
 
 import React, { useState, useEffect, useRef } from 'react'
@@ -81,12 +86,14 @@ function SplatViewer() {
 interface FrameOverlayProps {
   targetWidth: number
   targetHeight: number
-  children: (bounds: { left: number; top: number; width: number; height: number }) => React.ReactNode
+  children: (bounds: { left: number; top: number; width: number; height: number }, aspectRatio: number) => React.ReactNode
 }
 
 function FrameOverlay({ targetWidth, targetHeight, children }: FrameOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [bounds, setBounds] = useState({ left: 0, top: 0, width: 0, height: 0 })
+  
+  const aspectRatio = targetWidth / targetHeight
   
   useEffect(() => {
     const updateBounds = () => {
@@ -129,7 +136,6 @@ function FrameOverlay({ targetWidth, targetHeight, children }: FrameOverlayProps
   }, [targetWidth, targetHeight])
   
   const frameColor = 'rgba(139, 115, 71, 0.6)'
-  const frameWidth = 2
   
   return (
     <div ref={containerRef} className="absolute inset-0 pointer-events-none">
@@ -229,7 +235,7 @@ function FrameOverlay({ targetWidth, targetHeight, children }: FrameOverlayProps
             height: bounds.height,
           }}
         >
-          {children(bounds)}
+          {children(bounds, aspectRatio)}
         </div>
       )}
     </div>
@@ -243,6 +249,7 @@ interface PolygonShapeProps {
   points: Point[]
   isSelected: boolean
   style: typeof DEFAULT_STYLE
+  aspectRatio: number
   onSelect?: () => void
   onVertexDrag?: (index: number, newPos: Point) => void
   onMidpointClick?: (index: number) => void
@@ -253,6 +260,7 @@ function PolygonShape({
   points, 
   isSelected, 
   style,
+  aspectRatio,
   onSelect,
   onVertexDrag,
   onMidpointClick,
@@ -263,12 +271,26 @@ function PolygonShape({
   const [hoverMidpoint, setHoverMidpoint] = useState<number | null>(null)
   const svgRef = useRef<SVGGElement>(null)
   
-  const pointsStr = points.map(p => `${p.x},${p.y}`).join(' ')
+  // Scale X coordinates for rendering (stored as 0-100%, rendered in aspect-ratio space)
+  const scaleX = (x: number) => x * aspectRatio
+  
+  const pointsStr = points.map(p => `${scaleX(p.x)},${p.y}`).join(' ')
   
   const midpoints = points.map((p, i) => {
     const next = points[(i + 1) % points.length]
     return { x: (p.x + next.x) / 2, y: (p.y + next.y) / 2 }
   })
+  
+  // Check if a midpoint is too close to any vertex (in screen space)
+  const isMidpointTooCloseToVertex = (midpoint: Point, minDist: number = 2.5): boolean => {
+    for (const p of points) {
+      const dx = (midpoint.x - p.x) * aspectRatio
+      const dy = midpoint.y - p.y
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      if (dist < minDist) return true
+    }
+    return false
+  }
   
   // Global mouse tracking for smooth dragging
   useEffect(() => {
@@ -279,6 +301,7 @@ function PolygonShape({
       if (!svg || !onVertexDrag) return
       
       const rect = svg.getBoundingClientRect()
+      // Convert screen coords to 0-100% storage coords
       const x = ((e.clientX - rect.left) / rect.width) * 100
       const y = ((e.clientY - rect.top) / rect.height) * 100
       
@@ -298,11 +321,12 @@ function PolygonShape({
     }
   }, [draggingVertex, onVertexDrag])
   
-  const VERTEX_R = 0.5
-  const VERTEX_HOVER_R = 0.7
-  const TOUCH_R = 1.8
-  const MID_R = 0.35
-  const MID_TOUCH_R = 1.4
+  // Visual radii (in viewBox units, which now match aspect ratio)
+  const VERTEX_R = 0.8
+  const VERTEX_HOVER_R = 1.0
+  const VERTEX_TOUCH_R = 2.5
+  const MID_R = 0.5
+  const MID_TOUCH_R = 1.0  // Reduced from 1.4 to avoid overlap
   
   const fillOpacity = isSelected ? style.selectedFillOpacity : style.fillOpacity
   const strokeColor = isSelected ? style.selectedStrokeColor : style.strokeColor
@@ -323,12 +347,46 @@ function PolygonShape({
         }}
       />
       
+      {/* Midpoints rendered FIRST so vertices are on top */}
+      {isSelected && points.length >= 3 && midpoints.map((p, i) => {
+        // Skip midpoints that are too close to vertices
+        if (isMidpointTooCloseToVertex(p)) return null
+        
+        return (
+          <g key={`m-${i}`}>
+            <circle
+              cx={scaleX(p.x)}
+              cy={p.y}
+              r={MID_TOUCH_R}
+              fill="transparent"
+              className="cursor-cell"
+              onClick={(e) => {
+                e.stopPropagation()
+                onMidpointClick?.(i)
+              }}
+              onMouseEnter={() => setHoverMidpoint(i)}
+              onMouseLeave={() => setHoverMidpoint(null)}
+            />
+            <circle
+              cx={scaleX(p.x)}
+              cy={p.y}
+              r={hoverMidpoint === i ? MID_R * 1.3 : MID_R}
+              fill={hoverMidpoint === i ? '#60a5fa' : 'rgba(96, 165, 250, 0.4)'}
+              stroke="rgba(0,0,0,0.3)"
+              strokeWidth={0.1}
+              pointerEvents="none"
+            />
+          </g>
+        )
+      })}
+      
+      {/* Vertices rendered LAST so they're on top */}
       {isSelected && points.map((p, i) => (
         <g key={`v-${i}`}>
           <circle
-            cx={p.x}
+            cx={scaleX(p.x)}
             cy={p.y}
-            r={TOUCH_R}
+            r={VERTEX_TOUCH_R}
             fill="transparent"
             className="cursor-move"
             onMouseDown={(e) => {
@@ -345,39 +403,12 @@ function PolygonShape({
             onContextMenu={(e) => e.preventDefault()}
           />
           <circle
-            cx={p.x}
+            cx={scaleX(p.x)}
             cy={p.y}
             r={hoverVertex === i || draggingVertex === i ? VERTEX_HOVER_R : VERTEX_R}
             fill={draggingVertex === i ? '#fff' : hoverVertex === i ? '#fbbf24' : '#f59e0b'}
-            stroke="rgba(0,0,0,0.4)"
-            strokeWidth={0.08}
-            pointerEvents="none"
-          />
-        </g>
-      ))}
-      
-      {isSelected && points.length >= 3 && midpoints.map((p, i) => (
-        <g key={`m-${i}`}>
-          <circle
-            cx={p.x}
-            cy={p.y}
-            r={MID_TOUCH_R}
-            fill="transparent"
-            className="cursor-crosshair"
-            onClick={(e) => {
-              e.stopPropagation()
-              onMidpointClick?.(i)
-            }}
-            onMouseEnter={() => setHoverMidpoint(i)}
-            onMouseLeave={() => setHoverMidpoint(null)}
-          />
-          <circle
-            cx={p.x}
-            cy={p.y}
-            r={hoverMidpoint === i ? MID_R * 1.4 : MID_R}
-            fill={hoverMidpoint === i ? '#60a5fa' : 'rgba(96, 165, 250, 0.35)'}
-            stroke="rgba(0,0,0,0.2)"
-            strokeWidth={0.05}
+            stroke="rgba(0,0,0,0.5)"
+            strokeWidth={0.12}
             pointerEvents="none"
           />
         </g>
@@ -389,15 +420,18 @@ function PolygonShape({
 // ============================================
 // Drawing Polygon
 // ============================================
-function DrawingPolygon({ points, mousePos, style }: { 
+function DrawingPolygon({ points, mousePos, style, aspectRatio }: { 
   points: Point[]
   mousePos: Point | null
-  style: typeof DEFAULT_STYLE 
+  style: typeof DEFAULT_STYLE
+  aspectRatio: number
 }) {
   if (points.length === 0) return null
   
+  const scaleX = (x: number) => x * aspectRatio
+  
   const allPoints = mousePos ? [...points, mousePos] : points
-  const pointsStr = allPoints.map(p => `${p.x},${p.y}`).join(' ')
+  const pointsStr = allPoints.map(p => `${scaleX(p.x)},${p.y}`).join(' ')
   
   return (
     <g>
@@ -406,16 +440,16 @@ function DrawingPolygon({ points, mousePos, style }: {
         fill="none"
         stroke={style.selectedStrokeColor}
         strokeWidth={style.selectedStrokeWidth}
-        strokeDasharray="0.6,0.3"
+        strokeDasharray="1,0.5"
       />
       
       {points.length >= 2 && mousePos && (
         <line
-          x1={mousePos.x} y1={mousePos.y}
-          x2={points[0].x} y2={points[0].y}
+          x1={scaleX(mousePos.x)} y1={mousePos.y}
+          x2={scaleX(points[0].x)} y2={points[0].y}
           stroke={style.selectedStrokeColor}
-          strokeWidth={0.15}
-          strokeDasharray="0.3,0.3"
+          strokeWidth={0.2}
+          strokeDasharray="0.5,0.5"
           opacity={0.4}
         />
       )}
@@ -423,24 +457,24 @@ function DrawingPolygon({ points, mousePos, style }: {
       {points.map((p, i) => (
         <circle
           key={i}
-          cx={p.x}
+          cx={scaleX(p.x)}
           cy={p.y}
-          r={i === 0 && points.length >= 3 ? 0.8 : 0.5}
+          r={i === 0 && points.length >= 3 ? 1.2 : 0.8}
           fill={i === 0 ? '#22c55e' : '#f59e0b'}
-          stroke="rgba(0,0,0,0.3)"
-          strokeWidth={0.08}
+          stroke="rgba(0,0,0,0.4)"
+          strokeWidth={0.12}
         />
       ))}
       
       {points.length >= 3 && (
         <circle
-          cx={points[0].x}
+          cx={scaleX(points[0].x)}
           cy={points[0].y}
-          r={1.4}
+          r={2.0}
           fill="none"
           stroke="#22c55e"
-          strokeWidth={0.12}
-          strokeDasharray="0.4,0.2"
+          strokeWidth={0.15}
+          strokeDasharray="0.6,0.3"
           opacity={0.5}
         />
       )}
@@ -463,6 +497,7 @@ interface OverlayProps {
   mousePos: Point | null
   onMouseMove: (pos: Point) => void
   style: typeof DEFAULT_STYLE
+  aspectRatio: number
 }
 
 function HotspotSvgOverlay({
@@ -476,13 +511,19 @@ function HotspotSvgOverlay({
   onCompleteDrawing,
   mousePos,
   onMouseMove,
-  style
+  style,
+  aspectRatio
 }: OverlayProps) {
   const svgRef = useRef<SVGSVGElement>(null)
+  
+  // viewBox matches aspect ratio so circles stay circular
+  const viewBoxWidth = 100 * aspectRatio
+  const viewBoxHeight = 100
   
   const getMousePosition = (e: React.MouseEvent): Point => {
     if (!svgRef.current) return { x: 0, y: 0 }
     const rect = svgRef.current.getBoundingClientRect()
+    // Return 0-100% coordinates for storage
     return {
       x: ((e.clientX - rect.left) / rect.width) * 100,
       y: ((e.clientY - rect.top) / rect.height) * 100
@@ -495,8 +536,11 @@ function HotspotSvgOverlay({
     if (mode === 'draw') {
       if (drawingPoints.length >= 3) {
         const first = drawingPoints[0]
-        const dist = Math.sqrt((pos.x - first.x) ** 2 + (pos.y - first.y) ** 2)
-        if (dist < 2.5) {
+        // Distance check in screen space (scale X by aspect ratio)
+        const dx = (pos.x - first.x) * aspectRatio
+        const dy = pos.y - first.y
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        if (dist < 3.5) {
           onCompleteDrawing()
           return
         }
@@ -553,7 +597,7 @@ function HotspotSvgOverlay({
   return (
     <svg
       ref={svgRef}
-      viewBox="0 0 100 100"
+      viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
       preserveAspectRatio="none"
       className="absolute inset-0 w-full h-full"
       style={{ cursor: mode === 'draw' ? 'crosshair' : 'default' }}
@@ -572,6 +616,7 @@ function HotspotSvgOverlay({
             points={bounds.points}
             isSelected={selectedId === hotspot.id}
             style={style}
+            aspectRatio={aspectRatio}
             onSelect={() => onSelectHotspot(hotspot.id)}
             onVertexDrag={(i, pos) => handleVertexDrag(hotspot.id, i, pos)}
             onMidpointClick={(i) => handleMidpointClick(hotspot.id, i)}
@@ -581,7 +626,12 @@ function HotspotSvgOverlay({
       })}
       
       {mode === 'draw' && (
-        <DrawingPolygon points={drawingPoints} mousePos={mousePos} style={style} />
+        <DrawingPolygon 
+          points={drawingPoints} 
+          mousePos={mousePos} 
+          style={style} 
+          aspectRatio={aspectRatio}
+        />
       )}
     </svg>
   )
@@ -740,7 +790,7 @@ function EditorPanel() {
     <>
       {/* Frame overlay with hotspot SVG inside */}
       <FrameOverlay targetWidth={targetWidth} targetHeight={targetHeight}>
-        {() => (
+        {(_, aspectRatio) => (
           <HotspotSvgOverlay
             hotspots={(localHotspots ?? []).filter(h => h.shape === 'polygon')}
             selectedId={selectedId}
@@ -753,6 +803,7 @@ function EditorPanel() {
             mousePos={mousePos}
             onMouseMove={setMousePos}
             style={style}
+            aspectRatio={aspectRatio}
           />
         )}
       </FrameOverlay>
