@@ -1,21 +1,18 @@
 /**
  * Display Settings - Foundational Kiosk Configuration
  * 
- * Configure:
- * - Target kiosk display resolution (determines aspect ratio for all editors)
- * - Overview camera position (the "home" view visitors see)
+ * CRITICAL ARCHITECTURAL PATTERN:
+ * The main component must be STATELESS - just like CameraCapture.
+ * All state lives in the Sidebar component.
+ * Communication between Sidebar and SplatViewer via window events.
  * 
- * CRITICAL: Follows the same pattern as CameraCapture.tsx
- * - Application renders immediately with module-level constants
- * - Window events used to control camera, not props
- * - No conditional rendering of PlayCanvas
+ * This prevents parent re-renders from killing PlayCanvas.
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { Application, Entity } from '@playcanvas/react'
-import { Camera, GSplat } from '@playcanvas/react/components'
-import { Script } from '@playcanvas/react/components'
+import { Camera, GSplat, Script } from '@playcanvas/react/components'
 import { useSplat, useApp } from '@playcanvas/react/hooks'
 import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs'
 import { useSplatData } from '../../hooks/useSplatData'
@@ -28,6 +25,11 @@ import { getOverviewViewpoint } from '../../data/viewpoints'
 // ============================================
 const SPLAT_URL = '/pump-room.ply'
 const INITIAL = getOverviewViewpoint()
+
+// Global state for camera sync (module level, not React state)
+let pauseCameraSync = false
+let currentPosition: [number, number, number] = [...INITIAL.position]
+let currentRotation: [number, number, number] = [...INITIAL.rotation]
 
 // ============================================
 // Splat Component
@@ -43,17 +45,16 @@ function PumpRoomSplat({ src }: { src: string }) {
 }
 
 // ============================================
-// Camera Controller - listens to window events
+// Camera Controller - handles two-way sync
 // ============================================
 function CameraController() {
   const app = useApp()
   const frameRef = useRef<number>()
-  const hasInitializedFromConfig = useRef(false)
   
   useEffect(() => {
     if (!app) return
     
-    // Handle command to set camera position (from config load or sidebar)
+    // Handle commands from Sidebar to set camera position
     const handleSetTransform = (e: CustomEvent) => {
       const cameraEntity = app.root.findByName('camera')
       if (!cameraEntity) return
@@ -68,9 +69,13 @@ function CameraController() {
       cameraEntity.setLocalPosition(position[0], position[1], position[2])
       cameraEntity.setLocalEulerAngles(rotation[0], rotation[1], rotation[2])
       
-      // Re-enable after a moment
+      // Update module-level state
+      currentPosition = [...position]
+      currentRotation = [...rotation]
+      
+      // Re-enable orbit after a moment
       setTimeout(() => {
-        if (cameraEntity.script?.cameraControls) {
+        if (cameraEntity?.script?.cameraControls) {
           cameraEntity.script.cameraControls.enabled = true
         }
       }, 100)
@@ -78,18 +83,19 @@ function CameraController() {
     
     window.addEventListener('set-camera-transform', handleSetTransform as EventListener)
     
-    // Broadcast camera position to UI continuously
+    // Broadcast camera position to Sidebar continuously
     const broadcastPosition = () => {
-      const cameraEntity = app.root.findByName('camera')
-      if (cameraEntity) {
-        const pos = cameraEntity.getPosition()
-        const rot = cameraEntity.getEulerAngles()
-        window.dispatchEvent(new CustomEvent('camera-update', {
-          detail: {
-            position: [pos.x, pos.y, pos.z],
-            rotation: [rot.x, rot.y, rot.z]
-          }
-        }))
+      if (!pauseCameraSync) {
+        const cameraEntity = app.root.findByName('camera')
+        if (cameraEntity) {
+          const pos = cameraEntity.getPosition()
+          const rot = cameraEntity.getEulerAngles()
+          currentPosition = [pos.x, pos.y, pos.z]
+          currentRotation = [rot.x, rot.y, rot.z]
+          window.dispatchEvent(new CustomEvent('camera-position-update', {
+            detail: { position: currentPosition, rotation: currentRotation }
+          }))
+        }
       }
       frameRef.current = requestAnimationFrame(broadcastPosition)
     }
@@ -106,18 +112,20 @@ function CameraController() {
 }
 
 // ============================================
-// Splat Viewer - renders immediately, no props
+// Splat Viewer - STATELESS, renders immediately
 // ============================================
 function SplatViewer() {
   return (
-    <Application graphicsDeviceOptions={{ antialias: false }}>
-      <Entity name="camera" position={INITIAL.position} rotation={INITIAL.rotation}>
-        <Camera clearColor="#1a1a2e" fov={INITIAL.fov || 60} farClip={1000} nearClip={0.01} />
-        <Script script={CameraControls} />
-      </Entity>
-      <PumpRoomSplat src={SPLAT_URL} />
-      <CameraController />
-    </Application>
+    <div className="flex-1 relative">
+      <Application graphicsDeviceOptions={{ antialias: false }}>
+        <Entity name="camera" position={INITIAL.position} rotation={INITIAL.rotation}>
+          <Camera clearColor="#1a1a2e" fov={INITIAL.fov || 60} farClip={1000} nearClip={0.01} />
+          <Script script={CameraControls} />
+        </Entity>
+        <PumpRoomSplat src={SPLAT_URL} />
+        <CameraController />
+      </Application>
+    </div>
   )
 }
 
@@ -259,9 +267,9 @@ function CameraDisplay({ position, rotation, fov, onFovChange }: CameraDisplayPr
 }
 
 // ============================================
-// Main Component
+// Sidebar - ALL STATE LIVES HERE
 // ============================================
-export default function DisplaySettings() {
+function Sidebar() {
   const { config, loading, error } = useSplatData()
   
   // Local state for editing
@@ -274,12 +282,12 @@ export default function DisplaySettings() {
   const [saved, setSaved] = useState(false)
   const [dirty, setDirty] = useState(false)
   
-  // Track if we've initialized camera from config
-  const hasInitializedCamera = useRef(false)
+  // Track if we've initialized from config
+  const hasInitializedFromConfig = useRef(false)
   
   // Load config values and set camera position via window event
   useEffect(() => {
-    if (config && !hasInitializedCamera.current) {
+    if (config && !hasInitializedFromConfig.current) {
       setTargetWidth(config.target_width || 1920)
       setTargetHeight(config.target_height || 1080)
       
@@ -296,7 +304,7 @@ export default function DisplaySettings() {
         detail: { position: pos, rotation: rot }
       }))
       
-      hasInitializedCamera.current = true
+      hasInitializedFromConfig.current = true
     }
   }, [config])
   
@@ -308,14 +316,14 @@ export default function DisplaySettings() {
       setCameraRotation([rotation[0], rotation[1], rotation[2]])
       
       // Only mark dirty after initial load
-      if (hasInitializedCamera.current) {
+      if (hasInitializedFromConfig.current) {
         setDirty(true)
         setSaved(false)
       }
     }
     
-    window.addEventListener('camera-update', handleCameraUpdate as EventListener)
-    return () => window.removeEventListener('camera-update', handleCameraUpdate as EventListener)
+    window.addEventListener('camera-position-update', handleCameraUpdate as EventListener)
+    return () => window.removeEventListener('camera-position-update', handleCameraUpdate as EventListener)
   }, [])
   
   const handleResolutionChange = (w: number, h: number) => {
@@ -372,92 +380,96 @@ export default function DisplaySettings() {
   }
   
   return (
-    <div className="w-screen h-screen bg-black flex">
-      {/* Viewer area - NO conditional rendering, NO AspectRatioContainer */}
-      <div className="flex-1 relative bg-neutral-950">
-        <SplatViewer />
-        {/* Resolution indicator overlay */}
-        <div className="absolute top-4 left-4 bg-black/70 text-amber-500 text-xs px-2 py-1 rounded z-10">
+    <div className="w-80 bg-neutral-900 text-white flex flex-col">
+      {/* Header */}
+      <div className="p-4 border-b border-neutral-700">
+        <Link to="/admin" className="text-amber-600 hover:text-amber-500 text-xs">
+          ← Admin
+        </Link>
+        <h1 className="text-lg font-medium text-neutral-200 mt-1">Display Settings</h1>
+        <p className="text-xs text-neutral-500 mt-1">
+          Configure target resolution and overview camera for this kiosk.
+        </p>
+      </div>
+      
+      {loading && (
+        <div className="p-4 bg-neutral-800 text-neutral-400 text-sm">Loading config...</div>
+      )}
+      {error && (
+        <div className="p-4 bg-red-900/30 text-red-400 text-sm">{error}</div>
+      )}
+      
+      {/* Resolution Section */}
+      <div className="p-4 border-b border-neutral-700">
+        <h2 className="text-sm font-medium text-neutral-300 mb-3">Target Display</h2>
+        <ResolutionSelector
+          width={targetWidth}
+          height={targetHeight}
+          onChange={handleResolutionChange}
+        />
+        {/* Resolution indicator */}
+        <div className="mt-2 text-xs text-amber-600">
           Target: {targetWidth}×{targetHeight}
         </div>
       </div>
       
-      {/* Sidebar */}
-      <div className="w-80 bg-neutral-900 text-white flex flex-col">
-        {/* Header */}
-        <div className="p-4 border-b border-neutral-700">
-          <Link to="/admin" className="text-amber-600 hover:text-amber-500 text-xs">
-            ← Admin
-          </Link>
-          <h1 className="text-lg font-medium text-neutral-200 mt-1">Display Settings</h1>
-          <p className="text-xs text-neutral-500 mt-1">
-            Configure target resolution and overview camera for this kiosk.
-          </p>
-        </div>
+      {/* Camera Section */}
+      <div className="p-4 border-b border-neutral-700 flex-1">
+        <h2 className="text-sm font-medium text-neutral-300 mb-3">Overview Camera</h2>
+        <CameraDisplay
+          position={cameraPosition}
+          rotation={cameraRotation}
+          fov={cameraFov}
+          onFovChange={handleFovChange}
+        />
+        <p className="text-[10px] text-neutral-600 mt-3">
+          Navigate to the default "home" view visitors will see when the kiosk starts or resets.
+        </p>
+      </div>
+      
+      {/* Actions */}
+      <div className="p-4 border-t border-neutral-800 space-y-2">
+        <button
+          onClick={handleSave}
+          disabled={!dirty || saving}
+          className={`w-full py-2 rounded text-sm font-medium transition-colors ${
+            dirty 
+              ? 'bg-amber-700 hover:bg-amber-600 text-white' 
+              : 'bg-neutral-700 text-neutral-500 cursor-not-allowed'
+          }`}
+        >
+          {saving ? 'Saving...' : saved ? '✓ Saved' : 'Save Settings'}
+        </button>
         
-        {loading && (
-          <div className="p-4 bg-neutral-800 text-neutral-400 text-sm">Loading config...</div>
-        )}
-        {error && (
-          <div className="p-4 bg-red-900/30 text-red-400 text-sm">{error}</div>
-        )}
-        
-        {/* Resolution Section */}
-        <div className="p-4 border-b border-neutral-700">
-          <h2 className="text-sm font-medium text-neutral-300 mb-3">Target Display</h2>
-          <ResolutionSelector
-            width={targetWidth}
-            height={targetHeight}
-            onChange={handleResolutionChange}
-          />
-        </div>
-        
-        {/* Camera Section */}
-        <div className="p-4 border-b border-neutral-700 flex-1">
-          <h2 className="text-sm font-medium text-neutral-300 mb-3">Overview Camera</h2>
-          <CameraDisplay
-            position={cameraPosition}
-            rotation={cameraRotation}
-            fov={cameraFov}
-            onFovChange={handleFovChange}
-          />
-          <p className="text-[10px] text-neutral-600 mt-3">
-            Navigate to the default "home" view visitors will see when the kiosk starts or resets.
-          </p>
-        </div>
-        
-        {/* Actions */}
-        <div className="p-4 border-t border-neutral-800 space-y-2">
+        {dirty && (
           <button
-            onClick={handleSave}
-            disabled={!dirty || saving}
-            className={`w-full py-2 rounded text-sm font-medium transition-colors ${
-              dirty 
-                ? 'bg-amber-700 hover:bg-amber-600 text-white' 
-                : 'bg-neutral-700 text-neutral-500 cursor-not-allowed'
-            }`}
+            onClick={handleReset}
+            className="w-full py-2 rounded text-sm bg-neutral-800 hover:bg-neutral-700 text-neutral-400"
           >
-            {saving ? 'Saving...' : saved ? '✓ Saved' : 'Save Settings'}
+            Reset to Saved
           </button>
-          
-          {dirty && (
-            <button
-              onClick={handleReset}
-              className="w-full py-2 rounded text-sm bg-neutral-800 hover:bg-neutral-700 text-neutral-400"
-            >
-              Reset to Saved
-            </button>
-          )}
-        </div>
-        
-        {/* Footer */}
-        <div className="p-4 border-t border-neutral-800 text-[10px] text-neutral-700">
-          <div>{config?.id ? `Config: ${config.id.slice(0,8)}` : 'No config loaded'}</div>
-          <div className="mt-1">
-            Changes here affect all admin editors (hotspots, camera capture) and the deployed kiosk.
-          </div>
+        )}
+      </div>
+      
+      {/* Footer */}
+      <div className="p-4 border-t border-neutral-800 text-[10px] text-neutral-700">
+        <div>{config?.id ? `Config: ${config.id.slice(0,8)}` : 'No config loaded'}</div>
+        <div className="mt-1">
+          Changes here affect all admin editors and the deployed kiosk.
         </div>
       </div>
+    </div>
+  )
+}
+
+// ============================================
+// Main Component - STATELESS! Just layout.
+// ============================================
+export default function DisplaySettings() {
+  return (
+    <div className="w-screen h-screen bg-black flex">
+      <SplatViewer />
+      <Sidebar />
     </div>
   )
 }
