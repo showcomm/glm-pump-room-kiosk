@@ -2,9 +2,9 @@
  * Camera Capture Page
  * 
  * Admin tool for capturing camera viewpoints for equipment hotspots.
- * Based on SplatTest.tsx which has working camera controls.
  * 
- * Future: Will save positions to Supabase and associate with equipment.
+ * CRITICAL: The Application component must be isolated from React state changes.
+ * All UI state lives in the Sidebar component, outside the Application.
  */
 
 import { useState, useEffect, useRef } from 'react'
@@ -23,7 +23,7 @@ const SPLAT_URL = '/pump-room.ply'
 const INITIAL = getOverviewViewpoint()
 
 // ============================================
-// Splat Component
+// Splat Component - static, no state
 // ============================================
 function PumpRoomSplat({ src }: { src: string }) {
   const { asset, loading, error } = useSplat(src)
@@ -45,7 +45,8 @@ function PumpRoomSplat({ src }: { src: string }) {
 }
 
 // ============================================
-// Camera Helper - broadcasts position updates
+// Camera Helper - broadcasts position via window events
+// No React state inside Application
 // ============================================
 function CameraHelper() {
   const app = useApp()
@@ -88,9 +89,9 @@ function CameraHelper() {
 }
 
 // ============================================
-// Main Camera Capture Page
+// Sidebar - ALL state lives here, outside Application
 // ============================================
-export default function CameraCapture() {
+function Sidebar() {
   const [cameraData, setCameraData] = useState({ pos: [0, 0, 0], rot: [0, 0, 0] })
   const [selectedEquipment, setSelectedEquipment] = useState<string | null>(null)
   const [capturedPositions, setCapturedPositions] = useState<Record<string, any>>({})
@@ -124,14 +125,14 @@ export default function CameraCapture() {
       [selectedEquipment]: position
     }))
     
-    // Copy to clipboard as code
+    const equipmentItem = equipment.find(e => e.id === selectedEquipment)
     const code = `{
   id: '${selectedEquipment}-view',
   equipment_id: '${selectedEquipment}',
   position: [${position.position.join(', ')}],
   rotation: [${position.rotation.join(', ')}],
   fov: 60,
-  label: { en: '${equipment.find(e => e.id === selectedEquipment)?.name.en}', fr: '${equipment.find(e => e.id === selectedEquipment)?.name.fr}' }
+  label: { en: '${equipmentItem?.name.en || ''}', fr: '${equipmentItem?.name.fr || ''}' }
 },`
     
     navigator.clipboard.writeText(code)
@@ -140,14 +141,17 @@ export default function CameraCapture() {
   
   const handleCopyAll = () => {
     const allCode = Object.values(capturedPositions)
-      .map(p => `{
+      .map(p => {
+        const equipmentItem = equipment.find(e => e.id === p.equipment_id)
+        return `{
   id: '${p.equipment_id}-view',
   equipment_id: '${p.equipment_id}',
   position: [${p.position.join(', ')}],
   rotation: [${p.rotation.join(', ')}],
   fov: 60,
-  label: { en: '', fr: '' }
-},`)
+  label: { en: '${equipmentItem?.name.en || ''}', fr: '${equipmentItem?.name.fr || ''}' }
+},`
+      })
       .join('\n')
     
     navigator.clipboard.writeText(allCode)
@@ -155,129 +159,144 @@ export default function CameraCapture() {
   }
   
   return (
-    <div className="w-screen h-screen bg-black flex">
-      {/* 3D Viewer - left side */}
-      <div className="flex-1 relative">
-        <Application graphicsDeviceOptions={{ antialias: false }}>
-          <Entity 
-            name="camera" 
-            position={INITIAL.position}
-            rotation={INITIAL.rotation}
-          >
-            <Camera 
-              clearColor="#1a1a2e"
-              fov={60}
-              farClip={1000}
-              nearClip={0.01}
-            />
-            <Script script={CameraControls} />
-          </Entity>
-          <PumpRoomSplat src={SPLAT_URL} />
-          <CameraHelper />
-        </Application>
+    <div className="w-96 bg-museum-dark text-white p-4 overflow-y-auto">
+      {/* Header */}
+      <div className="mb-6">
+        <Link 
+          to="/admin" 
+          className="text-museum-highlight hover:text-museum-accent text-sm mb-2 inline-block"
+        >
+          ← Back to Admin
+        </Link>
+        <h1 className="text-xl font-display text-museum-highlight">
+          Camera Position Capture
+        </h1>
+      </div>
+      
+      {/* Current Position */}
+      <div className="bg-black/50 rounded-lg p-4 mb-6 font-mono text-sm">
+        <div className="text-gray-400 mb-2">Current Camera</div>
+        <div>Pos: [{cameraData.pos.map(v => formatNum(v, 2)).join(', ')}]</div>
+        <div>Rot: [{cameraData.rot.map(v => formatNum(v, 1)).join(', ')}]</div>
+      </div>
+      
+      {/* Equipment Selection */}
+      <div className="mb-6">
+        <label className="block text-sm text-gray-400 mb-2">
+          Select Equipment to Capture
+        </label>
+        <select
+          value={selectedEquipment || ''}
+          onChange={(e) => setSelectedEquipment(e.target.value || null)}
+          className="w-full bg-museum-brown/50 border border-museum-accent/30 rounded px-3 py-2 text-white"
+        >
+          <option value="">-- Select Equipment --</option>
+          {equipment.map(e => (
+            <option key={e.id} value={e.id}>
+              {e.name.en}
+              {capturedPositions[e.id] ? ' ✓' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+      
+      {/* Capture Button */}
+      <button
+        onClick={handleCapture}
+        disabled={!selectedEquipment}
+        className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:cursor-not-allowed py-3 rounded font-bold mb-4"
+      >
+        Capture Position
+      </button>
+      
+      {/* Captured Positions */}
+      <div className="mb-6">
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="text-sm text-gray-400">
+            Captured ({Object.keys(capturedPositions).length})
+          </h2>
+          {Object.keys(capturedPositions).length > 0 && (
+            <button
+              onClick={handleCopyAll}
+              className="text-xs text-blue-400 hover:text-blue-300"
+            >
+              Copy All
+            </button>
+          )}
+        </div>
         
-        {/* Controls overlay */}
-        <div className="absolute bottom-4 left-4 bg-black/70 text-white px-4 py-2 rounded text-sm">
-          Left-drag: orbit | Scroll: zoom | Middle-drag: pan
+        <div className="space-y-2">
+          {Object.entries(capturedPositions).map(([id, pos]) => (
+            <div 
+              key={id}
+              className="bg-green-900/30 border border-green-700/50 rounded p-2 text-xs"
+            >
+              <div className="font-bold text-green-400">
+                {equipment.find(e => e.id === id)?.name.en}
+              </div>
+              <div className="text-gray-400 font-mono">
+                [{pos.position.join(', ')}]
+              </div>
+            </div>
+          ))}
         </div>
       </div>
       
-      {/* Sidebar - right side */}
-      <div className="w-96 bg-museum-dark text-white p-4 overflow-y-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <Link 
-            to="/admin" 
-            className="text-museum-highlight hover:text-museum-accent text-sm mb-2 inline-block"
-          >
-            ← Back to Admin
-          </Link>
-          <h1 className="text-xl font-display text-museum-highlight">
-            Camera Position Capture
-          </h1>
-        </div>
-        
-        {/* Current Position */}
-        <div className="bg-black/50 rounded-lg p-4 mb-6 font-mono text-sm">
-          <div className="text-gray-400 mb-2">Current Camera</div>
-          <div>Pos: [{cameraData.pos.map(v => formatNum(v, 2)).join(', ')}]</div>
-          <div>Rot: [{cameraData.rot.map(v => formatNum(v, 1)).join(', ')}]</div>
-        </div>
-        
-        {/* Equipment Selection */}
-        <div className="mb-6">
-          <label className="block text-sm text-gray-400 mb-2">
-            Select Equipment to Capture
-          </label>
-          <select
-            value={selectedEquipment || ''}
-            onChange={(e) => setSelectedEquipment(e.target.value || null)}
-            className="w-full bg-museum-brown/50 border border-museum-accent/30 rounded px-3 py-2 text-white"
-          >
-            <option value="">-- Select Equipment --</option>
-            {equipment.map(e => (
-              <option key={e.id} value={e.id}>
-                {e.name.en}
-                {capturedPositions[e.id] ? ' ✓' : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-        
-        {/* Capture Button */}
-        <button
-          onClick={handleCapture}
-          disabled={!selectedEquipment}
-          className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:cursor-not-allowed py-3 rounded font-bold mb-4"
-        >
-          Capture Position for Selected Equipment
-        </button>
-        
-        {/* Captured Positions */}
-        <div className="mb-6">
-          <div className="flex justify-between items-center mb-2">
-            <h2 className="text-sm text-gray-400">
-              Captured Positions ({Object.keys(capturedPositions).length})
-            </h2>
-            {Object.keys(capturedPositions).length > 0 && (
-              <button
-                onClick={handleCopyAll}
-                className="text-xs text-blue-400 hover:text-blue-300"
-              >
-                Copy All
-              </button>
-            )}
-          </div>
-          
-          <div className="space-y-2">
-            {Object.entries(capturedPositions).map(([id, pos]) => (
-              <div 
-                key={id}
-                className="bg-green-900/30 border border-green-700/50 rounded p-2 text-xs"
-              >
-                <div className="font-bold text-green-400">
-                  {equipment.find(e => e.id === id)?.name.en}
-                </div>
-                <div className="text-gray-400 font-mono">
-                  [{pos.position.join(', ')}]
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        
-        {/* Instructions */}
-        <div className="text-xs text-gray-500 border-t border-gray-700 pt-4">
-          <p className="mb-2"><strong>How to use:</strong></p>
-          <ol className="list-decimal list-inside space-y-1">
-            <li>Select equipment from dropdown</li>
-            <li>Navigate camera to good viewpoint</li>
-            <li>Click "Capture Position"</li>
-            <li>Position is copied to clipboard</li>
-            <li>Paste into viewpoints.ts</li>
-          </ol>
-        </div>
+      {/* Instructions */}
+      <div className="text-xs text-gray-500 border-t border-gray-700 pt-4">
+        <p className="mb-2"><strong>How to use:</strong></p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Select equipment from dropdown</li>
+          <li>Navigate camera to good viewpoint</li>
+          <li>Click "Capture Position"</li>
+          <li>Position is copied to clipboard</li>
+          <li>Paste into viewpoints.ts</li>
+        </ol>
       </div>
+    </div>
+  )
+}
+
+// ============================================
+// PlayCanvas Viewer - completely isolated, no state
+// ============================================
+function SplatViewer() {
+  return (
+    <div className="flex-1 relative">
+      <Application graphicsDeviceOptions={{ antialias: false }}>
+        <Entity 
+          name="camera" 
+          position={INITIAL.position}
+          rotation={INITIAL.rotation}
+        >
+          <Camera 
+            clearColor="#1a1a2e"
+            fov={60}
+            farClip={1000}
+            nearClip={0.01}
+          />
+          <Script script={CameraControls} />
+        </Entity>
+        <PumpRoomSplat src={SPLAT_URL} />
+        <CameraHelper />
+      </Application>
+      
+      {/* Controls overlay */}
+      <div className="absolute bottom-4 left-4 bg-black/70 text-white px-4 py-2 rounded text-sm">
+        Left-drag: orbit | Scroll: zoom | Middle-drag: pan
+      </div>
+    </div>
+  )
+}
+
+// ============================================
+// Main Page - composes Viewer + Sidebar
+// ============================================
+export default function CameraCapture() {
+  return (
+    <div className="w-screen h-screen bg-black flex">
+      <SplatViewer />
+      <Sidebar />
     </div>
   )
 }
