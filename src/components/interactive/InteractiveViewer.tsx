@@ -181,9 +181,34 @@ function CameraAnimator() {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
   }
   
-  // Lerp helper
+  // Lerp helper for linear values
   const lerp = (start: number, end: number, t: number): number => {
     return start + (end - start) * t
+  }
+  
+  // Shortest-path angle interpolation - always takes the most direct route
+  const lerpAngle = (start: number, end: number, t: number): number => {
+    // Normalize angles to -180 to 180 range
+    const normalizeAngle = (angle: number) => {
+      let normalized = angle % 360
+      if (normalized > 180) normalized -= 360
+      if (normalized < -180) normalized += 360
+      return normalized
+    }
+    
+    const startNorm = normalizeAngle(start)
+    const endNorm = normalizeAngle(end)
+    
+    // Calculate the shortest delta between angles
+    let delta = endNorm - startNorm
+    
+    // Wrap around if needed to take shorter path
+    // Example: going from 350° to 10° should go +20°, not -340°
+    if (delta > 180) delta -= 360
+    if (delta < -180) delta += 360
+    
+    // Interpolate along the shortest path
+    return startNorm + delta * t
   }
   
   useEffect(() => {
@@ -211,9 +236,10 @@ function CameraAnimator() {
       const newY = lerp(startPosRef.current.y, targetViewpoint.position[1], t)
       const newZ = lerp(startPosRef.current.z, targetViewpoint.position[2], t)
       
-      const newRotX = lerp(startRotRef.current.x, targetViewpoint.rotation[0], t)
-      const newRotY = lerp(startRotRef.current.y, targetViewpoint.rotation[1], t)
-      const newRotZ = lerp(startRotRef.current.z, targetViewpoint.rotation[2], t)
+      // Use shortest-path angle interpolation for rotation to avoid spinning the long way
+      const newRotX = lerpAngle(startRotRef.current.x, targetViewpoint.rotation[0], t)
+      const newRotY = lerpAngle(startRotRef.current.y, targetViewpoint.rotation[1], t)
+      const newRotZ = lerpAngle(startRotRef.current.z, targetViewpoint.rotation[2], t)
       
       cameraEntity.setLocalPosition(newX, newY, newZ)
       cameraEntity.setLocalEulerAngles(newRotX, newRotY, newRotZ)
