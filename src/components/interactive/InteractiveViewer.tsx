@@ -166,15 +166,15 @@ function PumpRoomSplat({ src }: { src: string }) {
 }
 
 // ============================================
-// Camera Animator - handles transitions imperatively with look-at constraint
+// Camera Animator - handles transitions imperatively using QUATERNIONS
 // ============================================
 function CameraAnimator() {
   const app = useApp()
   const animationRef = useRef<number>()
   const startTimeRef = useRef<number>(0)
   const startPosRef = useRef({ x: INITIAL.position[0], y: INITIAL.position[1], z: INITIAL.position[2] })
-  const startRotRef = useRef({ x: INITIAL.rotation[0], y: INITIAL.rotation[1], z: INITIAL.rotation[2] })
-  const lookAtTargetRef = useRef({ x: 0, y: 0, z: 0 })
+  const startQuatRef = useRef<any>(null) // Will hold PlayCanvas Quat
+  const targetQuatRef = useRef<any>(null) // Will hold PlayCanvas Quat
   
   const targetViewpoint = useKioskStore(state => state.targetViewpoint)
   const isTransitioning = useKioskStore(state => state.isTransitioning)
@@ -185,71 +185,9 @@ function CameraAnimator() {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
   }
   
-  // Lerp helper for linear values
+  // Lerp helper for linear values (position only)
   const lerp = (start: number, end: number, t: number): number => {
     return start + (end - start) * t
-  }
-  
-  // Shortest-path angle interpolation
-  const lerpAngle = (start: number, end: number, t: number): number => {
-    const normalizeAngle = (angle: number) => {
-      let normalized = angle % 360
-      if (normalized > 180) normalized -= 360
-      if (normalized < -180) normalized += 360
-      return normalized
-    }
-    
-    const startNorm = normalizeAngle(start)
-    const endNorm = normalizeAngle(end)
-    
-    let delta = endNorm - startNorm
-    if (delta > 180) delta -= 360
-    if (delta < -180) delta += 360
-    
-    return startNorm + delta * t
-  }
-  
-  // Calculate Euler angles to look at a target point from a given position
-  const calculateLookAtRotation = (
-    fromX: number, fromY: number, fromZ: number,
-    toX: number, toY: number, toZ: number
-  ): { pitch: number, yaw: number } => {
-    const dx = toX - fromX
-    const dy = toY - fromY
-    const dz = toZ - fromZ
-    
-    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz)
-    if (distance < 0.001) return { pitch: 0, yaw: 0 }
-    
-    // Yaw (rotation around Y axis) - horizontal angle
-    const yaw = Math.atan2(dx, dz) * (180 / Math.PI)
-    
-    // Pitch (rotation around X axis) - vertical angle
-    const horizontalDist = Math.sqrt(dx * dx + dz * dz)
-    const pitch = Math.atan2(dy, horizontalDist) * (180 / Math.PI)
-    
-    return { pitch, yaw }
-  }
-  
-  // Calculate the look-at target point based on final viewpoint
-  const calculateLookAtTarget = (
-    posX: number, posY: number, posZ: number,
-    pitch: number, yaw: number,
-    distance: number = 3.0
-  ): { x: number, y: number, z: number } => {
-    // Convert Euler angles to direction vector
-    const pitchRad = pitch * (Math.PI / 180)
-    const yawRad = yaw * (Math.PI / 180)
-    
-    const dirX = Math.sin(yawRad) * Math.cos(pitchRad)
-    const dirY = Math.sin(pitchRad)
-    const dirZ = Math.cos(yawRad) * Math.cos(pitchRad)
-    
-    return {
-      x: posX + dirX * distance,
-      y: posY + dirY * distance,
-      z: posZ + dirZ * distance
-    }
   }
   
   useEffect(() => {
@@ -261,70 +199,46 @@ function CameraAnimator() {
       return
     }
     
-    // Capture starting position and rotation
-    const currentPos = cameraEntity.getLocalPosition()
-    const currentRot = cameraEntity.getLocalEulerAngles()
-    startPosRef.current = { x: currentPos.x, y: currentPos.y, z: currentPos.z }
-    startRotRef.current = { x: currentRot.x, y: currentRot.y, z: currentRot.z }
-    startTimeRef.current = Date.now()
+    // Access PlayCanvas math library
+    const pc = (window as any).pc
+    if (!pc) {
+      console.error('PlayCanvas pc library not found')
+      return
+    }
     
-    // Calculate look-at target point from final viewpoint
-    lookAtTargetRef.current = calculateLookAtTarget(
-      targetViewpoint.position[0],
-      targetViewpoint.position[1],
-      targetViewpoint.position[2],
+    // Capture starting position and rotation (as quaternion)
+    const currentPos = cameraEntity.getLocalPosition()
+    startPosRef.current = { x: currentPos.x, y: currentPos.y, z: currentPos.z }
+    
+    // Get current rotation as quaternion
+    startQuatRef.current = cameraEntity.getLocalRotation().clone()
+    
+    // Convert target Euler angles to quaternion
+    targetQuatRef.current = new pc.Quat()
+    targetQuatRef.current.setFromEulerAngles(
       targetViewpoint.rotation[0],
       targetViewpoint.rotation[1],
-      3.0 // Look 3 units ahead in the direction the final camera is facing
+      targetViewpoint.rotation[2]
     )
+    
+    startTimeRef.current = Date.now()
     
     const animate = () => {
       const elapsed = Date.now() - startTimeRef.current
       const progress = Math.min(elapsed / TRANSITION_DURATION_MS, 1)
       const t = easeInOutCubic(progress)
       
-      // Interpolate position
+      // Interpolate position linearly
       const newX = lerp(startPosRef.current.x, targetViewpoint.position[0], t)
       const newY = lerp(startPosRef.current.y, targetViewpoint.position[1], t)
       const newZ = lerp(startPosRef.current.z, targetViewpoint.position[2], t)
       
-      let newRotX: number
-      let newRotY: number
-      let newRotZ: number
-      
-      if (progress < LOOK_AT_BLEND_START) {
-        // Phase 1: Look at the target point throughout the movement
-        const lookAt = calculateLookAtRotation(
-          newX, newY, newZ,
-          lookAtTargetRef.current.x,
-          lookAtTargetRef.current.y,
-          lookAtTargetRef.current.z
-        )
-        
-        newRotX = lookAt.pitch
-        newRotY = lookAt.yaw
-        newRotZ = 0 // Keep roll at zero during look-at
-      } else {
-        // Phase 2: Blend from look-at to final rotation
-        const blendProgress = (progress - LOOK_AT_BLEND_START) / (1 - LOOK_AT_BLEND_START)
-        const blendT = easeInOutCubic(blendProgress)
-        
-        // Calculate current look-at rotation
-        const lookAt = calculateLookAtRotation(
-          newX, newY, newZ,
-          lookAtTargetRef.current.x,
-          lookAtTargetRef.current.y,
-          lookAtTargetRef.current.z
-        )
-        
-        // Blend from look-at to final saved rotation
-        newRotX = lerpAngle(lookAt.pitch, targetViewpoint.rotation[0], blendT)
-        newRotY = lerpAngle(lookAt.yaw, targetViewpoint.rotation[1], blendT)
-        newRotZ = lerpAngle(0, targetViewpoint.rotation[2], blendT)
-      }
+      // Interpolate rotation using quaternion slerp
+      const resultQuat = new pc.Quat()
+      resultQuat.slerp(startQuatRef.current, targetQuatRef.current, t)
       
       cameraEntity.setLocalPosition(newX, newY, newZ)
-      cameraEntity.setLocalEulerAngles(newRotX, newRotY, newRotZ)
+      cameraEntity.setLocalRotation(resultQuat)
       
       if (progress < 1) {
         animationRef.current = requestAnimationFrame(animate)
