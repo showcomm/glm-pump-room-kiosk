@@ -447,14 +447,14 @@ function HotspotSvgOverlay({
     
     const pos = getMousePosition(e)
     
-    // Check if clicking near first point to close
+    // Check if clicking ON the green first point circle to close (radius 1.8)
     if (drawingPoints.length >= 3) {
       const first = drawingPoints[0]
       const dx = pos.x - first.x
       const dy = pos.y - first.y
       const dist = Math.sqrt(dx * dx + dy * dy)
       
-      if (dist < 4) {
+      if (dist < 1.5) {
         onCompleteDrawing()
         return
       }
