@@ -376,13 +376,13 @@ function PolygonShape({
 // ============================================
 // Drawing Polygon
 // IMPORTANT: All elements have pointerEvents="none" so clicks pass through to SVG
+// Proximity circle removed - just click the green circle directly to close
 // ============================================
-function DrawingPolygon({ points, mousePos, style, aspectRatio, isCloseable }: { 
+function DrawingPolygon({ points, mousePos, style, aspectRatio }: { 
   points: Point[]
   mousePos: Point | null
   style: HotspotStyle
   aspectRatio: number
-  isCloseable: boolean
 }) {
   if (points.length === 0) return null
   
@@ -404,16 +404,6 @@ function DrawingPolygon({ points, mousePos, style, aspectRatio, isCloseable }: {
           aspectRatio={aspectRatio} fill={i === 0 ? '#22c55e' : '#f59e0b'}
           stroke="rgba(0,0,0,0.4)" strokeWidth={0.15} pointerEvents="none" />
       ))}
-      
-      {/* Close zone indicator - visual feedback when closeable */}
-      {points.length >= 3 && (
-        <CircleAsEllipse cx={points[0].x} cy={points[0].y} r={4.0}
-          aspectRatio={aspectRatio} 
-          fill={isCloseable ? "rgba(34, 197, 94, 0.3)" : "rgba(34, 197, 94, 0.15)"} 
-          stroke={isCloseable ? "#4ade80" : "#22c55e"} 
-          strokeWidth={isCloseable ? 0.4 : 0.2} 
-          pointerEvents="none" />
-      )}
     </g>
   )
 }
@@ -427,6 +417,7 @@ interface OverlayProps {
   onUpdateBounds: (id: string, bounds: PolygonBounds) => void
   mode: EditorMode
   drawingPoints: Point[]
+  drawingComplete: boolean
   onAddDrawingPoint: (point: Point) => void
   onCompleteDrawing: () => void
   mousePos: Point | null
@@ -437,7 +428,7 @@ interface OverlayProps {
 
 function HotspotSvgOverlay({
   hotspots, selectedId, onUpdateBounds,
-  mode, drawingPoints, onAddDrawingPoint, onCompleteDrawing,
+  mode, drawingPoints, drawingComplete, onAddDrawingPoint, onCompleteDrawing,
   mousePos, onMouseMove, style, aspectRatio
 }: OverlayProps) {
   const svgRef = useRef<SVGSVGElement>(null)
@@ -451,24 +442,10 @@ function HotspotSvgOverlay({
     }
   }
   
-  // Check if current mouse position is close enough to close
-  const isCloseToFirstPoint = (): boolean => {
-    if (drawingPoints.length < 3 || !mousePos) return false
-    const first = drawingPoints[0]
-    // Use simple coordinate distance for close detection (no aspect ratio needed for threshold check)
-    const dx = mousePos.x - first.x
-    const dy = mousePos.y - first.y
-    const dist = Math.sqrt(dx * dx + dy * dy)
-    console.log('[HotspotEditor] Close check - mouse:', mousePos, 'first:', first, 'dist:', dist.toFixed(2))
-    return dist < 4  // 4 SVG units threshold
-  }
-  
   const handleClick = (e: React.MouseEvent) => {
-    console.log('[HotspotEditor] handleClick called, mode:', mode)
-    if (mode !== 'draw') return
+    if (mode !== 'draw' || drawingComplete) return
     
     const pos = getMousePosition(e)
-    console.log('[HotspotEditor] Click position:', pos, 'drawingPoints.length:', drawingPoints.length)
     
     // Check if clicking near first point to close
     if (drawingPoints.length >= 3) {
@@ -476,23 +453,18 @@ function HotspotSvgOverlay({
       const dx = pos.x - first.x
       const dy = pos.y - first.y
       const dist = Math.sqrt(dx * dx + dy * dy)
-      console.log('[HotspotEditor] Distance to first point:', dist.toFixed(2), '(threshold: 4)')
       
       if (dist < 4) {
-        console.log('[HotspotEditor] CLOSING POLYGON!')
         onCompleteDrawing()
         return
       }
     }
     
-    console.log('[HotspotEditor] Adding point:', pos)
     onAddDrawingPoint(pos)
   }
   
   const handleDoubleClick = () => {
-    console.log('[HotspotEditor] handleDoubleClick, mode:', mode, 'points:', drawingPoints.length)
-    if (mode === 'draw' && drawingPoints.length >= 3) {
-      console.log('[HotspotEditor] Double-click closing polygon!')
+    if (mode === 'draw' && !drawingComplete && drawingPoints.length >= 3) {
       onCompleteDrawing()
     }
   }
@@ -533,7 +505,7 @@ function HotspotSvgOverlay({
       style={{ cursor: mode === 'draw' ? 'crosshair' : 'default' }}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
-      onMouseMove={(e) => onMouseMove(getMousePosition(e))}
+      onMouseMove={(e) => !drawingComplete && onMouseMove(getMousePosition(e))}
       onContextMenu={(e) => e.preventDefault()}
     >
       {/* SVG Filter definitions */}
@@ -554,14 +526,13 @@ function HotspotSvgOverlay({
         )
       })}
       
-      {/* Drawing in progress */}
-      {mode === 'draw' && (
+      {/* Drawing in progress - only when NOT complete */}
+      {mode === 'draw' && !drawingComplete && (
         <DrawingPolygon 
           points={drawingPoints} 
           mousePos={mousePos} 
           style={style} 
           aspectRatio={aspectRatio}
-          isCloseable={isCloseToFirstPoint()}
         />
       )}
     </svg>
@@ -778,7 +749,7 @@ function Sidebar({
         
         {mode === 'draw' && !drawingComplete && (
           <div className="mt-2 text-[10px] text-neutral-500">
-            Click to place vertices. Click green circle or double-click to close.
+            Click to place vertices. Click green circle or double-click to close. Press ESC to cancel.
             {drawingPoints.length > 0 && (
               <div className="mt-1 flex items-center justify-between text-neutral-400">
                 <span>{drawingPoints.length} points</span>
@@ -950,6 +921,18 @@ export default function HotspotEditor() {
     }
   }, [config])
   
+  // ESC key handler - cancel drawing
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && mode === 'draw' && drawingPoints.length > 0) {
+        handleSetDrawingPoints([])
+      }
+    }
+    
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [mode, drawingPoints.length])
+  
   // Style change handler - updates local state and saves to Supabase with debounce
   const setStyle = useCallback((newStyle: HotspotStyle) => {
     setStyleLocal(newStyle)
@@ -965,10 +948,8 @@ export default function HotspotEditor() {
   
   // Complete drawing - mark as complete so sidebar shows save UI
   const handleCompleteDrawing = () => {
-    console.log('[HotspotEditor] handleCompleteDrawing called, points:', drawingPoints.length)
     if (drawingPoints.length < 3) return
     setDrawingComplete(true)
-    console.log('[HotspotEditor] Drawing marked as complete!')
   }
   
   // Reset drawing state
@@ -1050,6 +1031,7 @@ export default function HotspotEditor() {
               onUpdateBounds={handleUpdateBounds}
               mode={mode}
               drawingPoints={drawingPoints}
+              drawingComplete={drawingComplete}
               onAddDrawingPoint={(p) => {
                 if (!drawingComplete) {
                   setDrawingPoints(prev => [...prev, p])
