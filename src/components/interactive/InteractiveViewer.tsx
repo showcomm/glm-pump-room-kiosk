@@ -34,9 +34,6 @@ const DEFAULT_TARGET_WIDTH = 1920
 const DEFAULT_TARGET_HEIGHT = 1080
 const TRANSITION_DURATION_MS = 1200
 
-// Look-at blend threshold: camera looks at target for first 70%, then blends to final rotation
-const LOOK_AT_BLEND_START = 0.7
-
 // Default hotspot style - matches HotspotEditor
 const DEFAULT_STYLE = {
   fillColor: '#8b7355',
@@ -166,15 +163,14 @@ function PumpRoomSplat({ src }: { src: string }) {
 }
 
 // ============================================
-// Camera Animator - handles transitions imperatively using QUATERNIONS
+// Camera Animator - handles transitions imperatively
 // ============================================
 function CameraAnimator() {
   const app = useApp()
   const animationRef = useRef<number>()
   const startTimeRef = useRef<number>(0)
   const startPosRef = useRef({ x: INITIAL.position[0], y: INITIAL.position[1], z: INITIAL.position[2] })
-  const startQuatRef = useRef<any>(null) // Will hold PlayCanvas Quat
-  const targetQuatRef = useRef<any>(null) // Will hold PlayCanvas Quat
+  const startRotRef = useRef({ x: INITIAL.rotation[0], y: INITIAL.rotation[1], z: INITIAL.rotation[2] })
   
   const targetViewpoint = useKioskStore(state => state.targetViewpoint)
   const isTransitioning = useKioskStore(state => state.isTransitioning)
@@ -185,7 +181,7 @@ function CameraAnimator() {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
   }
   
-  // Lerp helper for linear values (position only)
+  // Lerp helper
   const lerp = (start: number, end: number, t: number): number => {
     return start + (end - start) * t
   }
@@ -199,28 +195,11 @@ function CameraAnimator() {
       return
     }
     
-    // Access PlayCanvas math library
-    const pc = (window as any).pc
-    if (!pc) {
-      console.error('PlayCanvas pc library not found')
-      return
-    }
-    
-    // Capture starting position and rotation (as quaternion)
+    // Capture starting position
     const currentPos = cameraEntity.getLocalPosition()
+    const currentRot = cameraEntity.getLocalEulerAngles()
     startPosRef.current = { x: currentPos.x, y: currentPos.y, z: currentPos.z }
-    
-    // Get current rotation as quaternion
-    startQuatRef.current = cameraEntity.getLocalRotation().clone()
-    
-    // Convert target Euler angles to quaternion
-    targetQuatRef.current = new pc.Quat()
-    targetQuatRef.current.setFromEulerAngles(
-      targetViewpoint.rotation[0],
-      targetViewpoint.rotation[1],
-      targetViewpoint.rotation[2]
-    )
-    
+    startRotRef.current = { x: currentRot.x, y: currentRot.y, z: currentRot.z }
     startTimeRef.current = Date.now()
     
     const animate = () => {
@@ -228,17 +207,16 @@ function CameraAnimator() {
       const progress = Math.min(elapsed / TRANSITION_DURATION_MS, 1)
       const t = easeInOutCubic(progress)
       
-      // Interpolate position linearly
       const newX = lerp(startPosRef.current.x, targetViewpoint.position[0], t)
       const newY = lerp(startPosRef.current.y, targetViewpoint.position[1], t)
       const newZ = lerp(startPosRef.current.z, targetViewpoint.position[2], t)
       
-      // Interpolate rotation using quaternion slerp
-      const resultQuat = new pc.Quat()
-      resultQuat.slerp(startQuatRef.current, targetQuatRef.current, t)
+      const newRotX = lerp(startRotRef.current.x, targetViewpoint.rotation[0], t)
+      const newRotY = lerp(startRotRef.current.y, targetViewpoint.rotation[1], t)
+      const newRotZ = lerp(startRotRef.current.z, targetViewpoint.rotation[2], t)
       
       cameraEntity.setLocalPosition(newX, newY, newZ)
-      cameraEntity.setLocalRotation(resultQuat)
+      cameraEntity.setLocalEulerAngles(newRotX, newRotY, newRotZ)
       
       if (progress < 1) {
         animationRef.current = requestAnimationFrame(animate)
